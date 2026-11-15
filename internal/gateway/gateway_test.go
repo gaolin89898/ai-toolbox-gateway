@@ -42,37 +42,66 @@ func sendEvent(w http.ResponseWriter, event string, value any) {
 	raw, _ := json.Marshal(value)
 	fmt.Fprintf(w, "data:%s\n\n", raw)
 }
-func loomyCatalog(w http.ResponseWriter) {
-	sendJSON(w, map[string]any{"data": []any{map[string]any{"id": "chat", "type": "chat", "protocol": "openai_chat"}, map[string]any{"id": "image", "type": "image", "protocol": "openai_image"}}})
+func decodeQoderTestRequest(t *testing.T, body io.Reader) map[string]any {
+	t.Helper()
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	for i, ch := range raw {
+		if ch == '$' {
+			raw[i] = '='
+		} else {
+			index := strings.IndexByte(qoderAlphabet, ch)
+			if index < 0 {
+				t.Fatalf("invalid Qoder request byte: %q", ch)
+			}
+			raw[i] = alphabet[index]
+		}
+	}
+	n, a := len(raw), len(raw)/3
+	decoded, err := base64.StdEncoding.DecodeString(string(raw[n-a:]) + string(raw[a:n-a]) + string(raw[:a]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(decoded, &value); err != nil {
+		t.Fatal(err)
+	}
+	return value
+}
+
+func qoderCatalog(w http.ResponseWriter) {
+	sendJSON(w, map[string]any{"chat": []any{map[string]any{"key": "chat", "display_name": "Chat", "enable": true}, map[string]any{"key": "disabled", "enable": false}}})
 }
 func completionEvent(w http.ResponseWriter, text, finish string) {
 	sendEvent(w, "", map[string]any{"id": "c1", "created": 1, "choices": []any{map[string]any{"index": 0, "delta": map[string]any{"content": text}, "finish_reason": finish}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}})
 }
 
-var chatBody = []byte(`{"model":"loomy/chat","messages":[{"role":"user","content":"hello"}]}`)
+var chatBody = []byte(`{"model":"qoder/chat","messages":[{"role":"user","content":"hello"}]}`)
 
-func TestLoomyRoutingCatalogAndSticky(t *testing.T) {
+func TestQoderRoutingCatalogAndSticky(t *testing.T) {
 	var calls []string
 	catalogCalls := 0
-	r := testRouter(t, "loomy", func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("token") != strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ") || len(req.Header.Get("traceparent")) != 55 {
+	r := testRouter(t, "qoder", func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasPrefix(req.Header.Get("Authorization"), "Bearer COSY.") || req.Header.Get("Cosy-Key") == "" || req.Header.Get("Cosy-Date") == "" {
 			t.Error("missing native authentication/trace")
 		}
-		if req.URL.Path == "/models" {
+		if req.URL.Path == "/algo/api/v2/model/list" {
 			catalogCalls++
-			loomyCatalog(w)
+			qoderCatalog(w)
 			return
 		}
-		var body map[string]any
-		json.NewDecoder(req.Body).Decode(&body)
-		if str(body["model"]) != "chat" || !flag(body["stream"]) {
+		body := decodeQoderTestRequest(t, req.Body)
+		if str(obj(body["model_config"])["key"]) != "chat" || !flag(body["stream"]) {
 			t.Error("model prefix or stream not rewritten")
 		}
-		calls = append(calls, req.Header.Get("token"))
+		calls = append(calls, req.Header.Get("Cosy-User"))
 		completionEvent(w, "OK", "stop")
 	}, Account{ID: "disabled", Disabled: true}, Account{ID: "a"}, Account{ID: "b"})
 	ms := r.Models(context.Background())
-	if len(ms) != 1 || str(ms[0]["id"]) != "loomy/chat" {
+	if len(ms) != 1 || str(ms[0]["id"]) != "qoder/chat" {
 		t.Fatalf("bad catalog: %v", ms)
 	}
 	raw, _ := json.Marshal(ms)
@@ -84,11 +113,11 @@ func TestLoomyRoutingCatalogAndSticky(t *testing.T) {
 		if err := r.Chat(context.Background(), chatBody, session, result.Add, nil); err != nil {
 			t.Fatal(err)
 		}
-		if str(result.Response()["model"]) != "loomy/chat" {
+		if str(result.Response()["model"]) != "qoder/chat" {
 			t.Fatal("response model prefix lost")
 		}
 	}
-	if len(calls) != 3 || calls[0] != "secret-a" || calls[1] != calls[0] || calls[2] != "secret-b" {
+	if len(calls) != 3 || calls[0] != "a" || calls[1] != calls[0] || calls[2] != "b" {
 		t.Fatalf("wrong routing: %v", calls)
 	}
 	if catalogCalls != 2 {
@@ -99,14 +128,14 @@ func TestLoomyRoutingCatalogAndSticky(t *testing.T) {
 func TestRejectedRequestRotatesAndCoolsDown(t *testing.T) {
 	counts := map[string]int{}
 	attempts := 0
-	r := testRouter(t, "loomy", func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path == "/models" {
-			loomyCatalog(w)
+	r := testRouter(t, "qoder", func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/algo/api/v2/model/list" {
+			qoderCatalog(w)
 			return
 		}
-		token := req.Header.Get("token")
+		token := req.Header.Get("Cosy-User")
 		counts[token]++
-		if token == "secret-a" {
+		if token == "a" {
 			w.WriteHeader(429)
 			fmt.Fprint(w, "upstream secret-a")
 			return
@@ -118,7 +147,7 @@ func TestRejectedRequestRotatesAndCoolsDown(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if counts["secret-a"] != 1 || counts["secret-b"] != 2 || attempts != 3 {
+	if counts["a"] != 1 || counts["b"] != 2 || attempts != 3 {
 		t.Fatalf("retry/cooldown mismatch: %v %d", counts, attempts)
 	}
 }
@@ -142,9 +171,9 @@ func TestNeverReplaysAmbiguousOrStartedStreams(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			r := testRouter(t, "loomy", func(w http.ResponseWriter, req *http.Request) {
-				if req.URL.Path == "/models" {
-					loomyCatalog(w)
+			r := testRouter(t, "qoder", func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Path == "/algo/api/v2/model/list" {
+					qoderCatalog(w)
 					return
 				}
 				calls++
@@ -165,9 +194,9 @@ func TestCapacityDisabledAndCancellation(t *testing.T) {
 	entered := make(chan struct{})
 	cancelled := make(chan struct{})
 	var calls atomic.Int32
-	r := testRouter(t, "loomy", func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path == "/models" {
-			loomyCatalog(w)
+	r := testRouter(t, "qoder", func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/algo/api/v2/model/list" {
+			qoderCatalog(w)
 			return
 		}
 		calls.Add(1)
@@ -365,9 +394,9 @@ func TestSSEFramesAndEmptyResponses(t *testing.T) {
 	if err != nil || strings.Join(got, "|") != "test:one\ntwo|:last" {
 		t.Fatalf("invalid SSE parsing: %v %v", got, err)
 	}
-	r := testRouter(t, "loomy", func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path == "/models" {
-			loomyCatalog(w)
+	r := testRouter(t, "qoder", func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/algo/api/v2/model/list" {
+			qoderCatalog(w)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -380,9 +409,9 @@ func TestSSEFramesAndEmptyResponses(t *testing.T) {
 
 func TestTerminalEventClosesUpstreamWithoutWaitingForEOF(t *testing.T) {
 	closed := make(chan struct{})
-	r := testRouter(t, "loomy", func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path == "/models" {
-			loomyCatalog(w)
+	r := testRouter(t, "qoder", func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/algo/api/v2/model/list" {
+			qoderCatalog(w)
 			return
 		}
 		io.Copy(io.Discard, req.Body)

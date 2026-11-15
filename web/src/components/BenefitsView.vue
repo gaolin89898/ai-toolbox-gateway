@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { Alert as AAlert, Button as AButton, Empty as AEmpty, Input as AInput, Modal as AModal, Option as AOption, Progress as AProgress, Radio as ARadio, RadioGroup as ARadioGroup, Select as ASelect, Spin as ASpin, Table as ATable, TableColumn as ATableColumn, Tag as ATag, Message } from '@arco-design/web-vue';
 import { IconRefresh, IconPlayArrow, IconSearch, IconGift, IconCopy, IconCheck, IconClockCircle, IconArrowRight, IconInfoCircle, IconCalendar, IconThunderbolt } from '@arco-design/web-vue/es/icon';
 import { accountCredits, formatNumber } from '../useAccounts';
+import DoubaoTasks from './DoubaoTasks.vue';
 
 const props = defineProps({ model: Object, section: String });
 const uid = ref(''), loading = ref(false), working = ref(false), error = ref(''), result = ref('');
@@ -213,7 +214,8 @@ watch([() => props.section, workbuddyReady], ([section, ready]) => { if (section
 </script>
 
 <template>
-  <section :class="['benefits-view', 'benefits-' + section]">
+  <DoubaoTasks v-if="section === 'tasks' && model.provider === 'doubao'" :model="model"><template #platform-switcher><slot name="platform-switcher" /></template></DoubaoTasks>
+  <section v-else :class="['benefits-view', 'benefits-' + section]">
     <header class="page-heading benefit-heading">
       <div class="page-toolbar"><slot name="platform-switcher" /><div class="heading-actions">
         <template v-if="section === 'tasks' && supported">

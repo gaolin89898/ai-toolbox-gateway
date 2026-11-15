@@ -12,6 +12,48 @@ import (
 
 const quotaFixture = `{"code":0,"data":{"current_subscription":{"display":{"short_name":"免费体验"}},"incentive_quota_section":{"window_limit_groups":[{"feature_group":"doubao_activity_reward_quota","feature_group_name":"活动赠送额度","window_limits":[{"total_amount":"200","used_amount":"0","window_type":3,"end_time":4070908800000}]}]},"window_limit_section":{"window_limit_groups":[{"feature_group":"general","window_limits":[{"total_amount":"500","used_amount":"0","window_type":2,"start_time":0,"end_time":0}]}]}}}`
 
+const standardQuotaFixture = `{"code":0,"data":{"current_subscription":{"display":{"short_name":"标准套餐"}},"incentive_quota_section":{"window_limit_groups":[{"feature_group":"doubao_activity_reward_quota","feature_group_name":"活动赠送额度","window_limits":[{"total_amount":"4,100","used_amount":"0","window_type":3,"end_time":4070908800000}]}]},"window_limit_section":{"window_limit_groups":[{"feature_group":"monthly_quota","feature_group_name":"","window_limits":[{"total_amount":"2,100","used_amount":"0","window_type":4,"end_time":4070941200000}]}]}}}`
+
+func TestStandardPlanAvailableBalance(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       float64
+	}{
+		{"standard plan plus gifts", standardQuotaFixture, 6200},
+		{"usage deducted", strings.Replace(standardQuotaFixture, `"used_amount":"0"`, `"used_amount":"75.5"`, 1), 6124.5},
+		{"expired plan", strings.Replace(standardQuotaFixture, `4070941200000`, `1000`, 1), 4100},
+		{"rolling limit is separate", quotaFixture, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tc.body) }))
+			defer upstream.Close()
+			client := &Client{HTTP: upstream.Client(), Base: upstream.URL}
+			balance, err := client.Balance(context.Background(), &Account{Cookie: "sessionid=private-session"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := status(Account{Credits: balance.Credits, Total: balance.Total, Plan: balance.Plan, Quotas: balance.Quotas, BalanceKnown: balance.Known})
+			if got.AvailableCredits != tc.want || !got.BalanceKnown {
+				t.Fatalf("incorrect available allowance: %+v", got)
+			}
+			if got.Plan == "标准套餐" && (got.AvailableTotal != 6200 || got.Quotas[1].Name != "套餐额度" || got.Quotas[1].WindowType != 4 || got.Quotas[1].Feature != "monthly_quota") {
+				t.Fatalf("lost plan allowance details: %+v", got)
+			}
+		})
+	}
+}
+
+func TestAvailableBalanceDoesNotDoubleCountWindows(t *testing.T) {
+	credits, total := availableBalance(4100, 4100, []Quota{
+		{Kind: "subscription", Feature: "monthly_quota", WindowType: 4, Remaining: 2100, Total: 2100},
+		{Kind: "subscription", Feature: "monthly_quota", WindowType: 4, Remaining: 2000, Total: 2100},
+		{Kind: "subscription", Feature: "monthly_quota", WindowType: 2, Remaining: 500, Total: 500},
+	})
+	if credits != 6100 || total != 6200 {
+		t.Fatalf("duplicate windows were added: remaining=%v total=%v", credits, total)
+	}
+}
+
 func TestBalanceUsesSubscriptionQuotas(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.URL.Path != "/alice/commerce/sale/subscription/quota/summary/" {

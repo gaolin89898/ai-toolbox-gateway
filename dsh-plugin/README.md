@@ -1,6 +1,6 @@
 # DSH ai-toolbox-gateway
 
-独立 Vue 页面与 DSH 插件入口，当前版本 **0.1.59**。Go 后端仍由本机单独运行；插件不启动、停止或打包 Go 程序，不读取 `config.json`、`auths/` 或 `data/`。
+独立 Vue 页面与 DSH 插件入口，当前版本 **0.1.66**。Go 后端仍由本机单独运行；插件不启动、停止或打包 Go 程序，不读取 `config.json`、`auths/` 或 `data/`。
 
 ## 后端运行状态与密钥（本页可查）
 
@@ -23,7 +23,9 @@ npm test
 npm pack
 ```
 
-构建生成 `web/dist/` 和插件的 `public/`，打包生成 `dsh-workbuddy-accounts-0.1.59.tgz`。包内只包含页面、DSH 入口和本机接口转发代码，不包含账号数据、密钥或 Go 二进制。
+构建生成 `web/dist/` 和插件的 `public/`，打包生成 `dsh-workbuddy-accounts-0.1.66.tgz`。包内只包含页面、DSH 入口和本机接口转发代码，不包含账号数据、密钥或 Go 二进制。
+
+0.1.66 修复 DSH 设置页「获取可用模型」保存后丢失图片能力的问题：启动及模型设置变化时，从本机网关补回缺失的输入模态，刷新会话中的模型能力；保留已选模型和显式设置。切换供应应用后提示在会话中选择新模型。豆包当前转发只支持文本。
 
 原有 `web` 目录的 `npm run build` 继续生成 Go 内嵌页面；独立版本使用 `npm run build:standalone`，不依赖 Go 编译。两个版本共用页面源码。更新插件时先用 `npm version patch --no-git-tag-version` 递增版本，并同步文档中的包名，再构建、检查和打包，避免缓存复用同版本旧资源。
 
@@ -39,7 +41,7 @@ npm pack
 2. 桌面版在「插件 → 添加插件 → 安装第三方插件」输入本地 `.tgz` 的绝对路径，安装后点击「立即启用」。更新时输入新版包路径即可；`desktop` profile 由桌面应用管理，不能通过 CLI 更新。独立 Web 版可使用：
 
    ```powershell
-   dsh plugin --profile web add "file:C:/绝对路径/dsh-workbuddy-accounts-0.1.59.tgz"
+   dsh plugin --profile web add "file:C:/绝对路径/dsh-workbuddy-accounts-0.1.65.tgz"
    ```
 
    包名以 `npm pack` 输出为准。
@@ -54,6 +56,12 @@ npm pack
 
 关闭页面或卸载插件不会关闭 Go 后端，后台签到继续由 Go 服务执行。账号和签到设置仍保存在原来的 `auths/`、`data/` 和 `config.json`；签到选项保存在 `data/account-settings.json`（跟随 `state_file` 目录），后端重启后保留。
 
+在 DSH 内切换「网关 → 供应应用」会自动获取 `/v1/models` 并实时更新「AI 工具箱网关」的模型目录，无需再到模型设置点击「获取可用模型」。保留积分倍率、思考档位、上下文与图片输入信息；获取失败会提示原因并保留原目录。独立 Go 面板不连接 DSH 设置服务。
+
+0.1.65 修正豆包标准套餐额度展示：可用额度计入套餐与赠送，滚动周期上限单独展示；查看豆包时每分钟自动查询，签到失败不再阻断额度更新。需配合新版 Go 后端使用。
+
+0.1.64 修复重复注册 pi-ai 适配器导致 DSH 设置拒绝写入的问题；供应应用切换后自动获取并实时更新模型，兼容本机与远程接口桥接，连续切换时以最新选择为准。
+
 ## 独立页面预览
 
 在本目录运行 `npm run preview`，访问 <http://127.0.0.1:5174/workbuddy-accounts/>。`FRONTEND_PORT` 可改页面端口，`WORKBUDDY_BACKEND_PORT` 可改本机 API 端口。预览仍需先启动后端。
@@ -64,7 +72,7 @@ npm pack
 
 嵌入 DSH 时，页面和 Arco 滚动条自动跟随 DSH 的深浅色与皮肤配色；独立打开时保留页面自己的主题设置。签到设置的三个开关开启为蓝底“开”、圆点在右，关闭为灰底“关”、圆点在左，两种主题均使用白色圆点和文字；点击「保存设置」后才生效，「取消」恢复已保存选项。
 
-0.1.59 将插件管理页、组件和侧栏显示名称统一为 `ai-toolbox-gateway`，与仓库名一致；保留原插件标识以兼容已有安装和配置。0.1.56 修复断线后停止刷新：页面每 5 秒静默重连，后端恢复后自动重新读取当前电脑的密钥和账号。Windows 可运行 `powershell -NoProfile -File scripts/install-backend-task.ps1`（仓库根目录）安装后台托管，登录后启动、进程退出 5 秒后重启；托管任务经 `conhost --headless` 拉起（Windows Terminal 设为默认终端时任务窗口也不会弹出），每分钟补拉起，日志保存在 `data/backend-startup.log` 和 `data/local-server.stderr.log`。部署替换二进制前先 `Stop-ScheduledTask -TaskName WorkBuddyAccountsBackend` 并停止后端，替换后再 `Start-ScheduledTask -TaskName WorkBuddyAccountsBackend`。0.1.55 添加 Antigravity 与豆包网页授权，无需填写 OAuth 凭证；豆包账号页显示「订阅与额度管理」的活动赠送额度、近 7 天等分项额度、已用量 / 总额、到期时间和刷新结果；Loomy 自动读取本机登录状态。需配合本次更新的 Go 后端使用。0.1.54 移除面板登录表单，打开页面自动连接当前电脑服务；「管理密钥」仅展示实际 API 密钥并支持复制，不再显示会话令牌。需配合新版 Go 后端使用。0.1.53 账号页 Loomy 对齐纯展示口径：隐藏签到列、行内签到、「全部签到」与自动签到洞察，保留积分余额查询与账号管理；后端已同步停止 Loomy 签到调度与手动签到接口。0.1.51 DSH 模型目录保留上游积分倍率、去掉 `vendor` 厂商标识段（如 `Deepseek-V4.1-Flash · f · x0.11` 显示为 `Deepseek-V4.1-Flash · x0.11`），并排除 auto 类路由条目（`cn:auto`、`global:auto-chat`、`global:default-model`、`qoder/auto`）；目录由 `scripts/sync-dsh-provider-models.mjs` 同时写入插件包与用户层 cordis.patch.yml。0.1.50 修复 0.1.49 的定向补丁遗漏 `name` 导致 `llm-pi-ai` 行被清空名字、pi-ai 适配器不加载（连带既有供应商消失）的问题：补丁必须同时写出插件名，否则整行字段替换会把名字置空。0.1.49 安装后把本机网关注册为 DSH 模型供应商（复用 dsh-base 的 pi-ai 适配器，`cordis.patch.yml` 定向补丁 `llm-pi-ai` 行）：目录含思考强度与视觉/文本输入模态，路由名 `workbuddy-gateway`，端点 `http://127.0.0.1:7863/v1`；面板接口校验通过的管理密钥会自动写入 DSH 凭证库 `WB2API_GATEWAY_API_KEY` 供其按次解析。模型目录由 `scripts/generate-dsh-provider-models.mjs` 从 `/v1/models` 生成，网关目录变化后重新生成并更新插件。0.1.48 供应应用为「自动」时，模型目录只展示第一个有可用账号的应用（WorkBuddy 国内 → 国际 → 其余接入应用），路由仍按前缀自动分发。0.1.47 增加网关供应应用选择，默认为自动，选择后整个网关固定使用该应用并仅展示其模型；配合新版后端支持单账号积分耗尽后切换。0.1.46 增加 Antigravity 账号导入、OAuth 凭证管理与网关模型筛选；后端需使用支持 Antigravity 的版本。0.1.44 修复网关「复制地址」按钮在 DSH 深色主题下白底白字的问题，按钮配色跟随宿主主题。0.1.43 保持账号平台下拉框与页头操作按钮同行显示，避免平板窗口宽度下工具栏被拆成两行。0.1.42 将账号平台切换改为下拉选择，保留平台图标与账号数量；修复活动奖励页计算最早到期时间时的渲染递归循环；复用日期格式化器，签到历史与每账号月度积分改为一次汇总，减少切页和日志刷新时的主线程停顿。可在运行前端开发服务后执行 `node scripts/check-embed-performance.mjs`（仓库根目录，需要 Playwright），用 500 条日志和 20 个账号验证同源 iframe 内的连续切页。
+0.1.61 移除 Loomy 平台入口、本机账号读取、积分接口与网关路由；旧 Loomy 供应应用设置自动回到「自动」。需配合新版 Go 后端使用。0.1.59 将插件管理页、组件和侧栏显示名称统一为 `ai-toolbox-gateway`，与仓库名一致；保留原插件标识以兼容已有安装和配置。0.1.56 修复断线后停止刷新：页面每 5 秒静默重连，后端恢复后自动重新读取当前电脑的密钥和账号。Windows 可运行 `powershell -NoProfile -File scripts/install-backend-task.ps1`（仓库根目录）安装后台托管，登录后启动、进程退出 5 秒后重启；托管任务经 `conhost --headless` 拉起（Windows Terminal 设为默认终端时任务窗口也不会弹出），每分钟补拉起，日志保存在 `data/backend-startup.log` 和 `data/local-server.stderr.log`。部署替换二进制前先 `Stop-ScheduledTask -TaskName WorkBuddyAccountsBackend` 并停止后端，替换后再 `Start-ScheduledTask -TaskName WorkBuddyAccountsBackend`。0.1.55 添加 Antigravity 与豆包网页授权，无需填写 OAuth 凭证；豆包账号页显示「订阅与额度管理」的活动赠送额度、近 7 天等分项额度、已用量 / 总额、到期时间和刷新结果；Loomy 自动读取本机登录状态。需配合本次更新的 Go 后端使用。0.1.54 移除面板登录表单，打开页面自动连接当前电脑服务；「管理密钥」仅展示实际 API 密钥并支持复制，不再显示会话令牌。需配合新版 Go 后端使用。0.1.53 账号页 Loomy 对齐纯展示口径：隐藏签到列、行内签到、「全部签到」与自动签到洞察，保留积分余额查询与账号管理；后端已同步停止 Loomy 签到调度与手动签到接口。0.1.51 DSH 模型目录保留上游积分倍率、去掉 `vendor` 厂商标识段（如 `Deepseek-V4.1-Flash · f · x0.11` 显示为 `Deepseek-V4.1-Flash · x0.11`），并排除 auto 类路由条目（`cn:auto`、`global:auto-chat`、`global:default-model`、`qoder/auto`）；目录由 `scripts/sync-dsh-provider-models.mjs` 同时写入插件包与用户层 cordis.patch.yml。0.1.50 修复 0.1.49 的定向补丁遗漏 `name` 导致 `llm-pi-ai` 行被清空名字、pi-ai 适配器不加载（连带既有供应商消失）的问题：补丁必须同时写出插件名，否则整行字段替换会把名字置空。0.1.49 安装后把本机网关注册为 DSH 模型供应商（复用 dsh-base 的 pi-ai 适配器，`cordis.patch.yml` 定向补丁 `llm-pi-ai` 行）：目录含思考强度与视觉/文本输入模态，路由名 `workbuddy-gateway`，端点 `http://127.0.0.1:7863/v1`；面板接口校验通过的管理密钥会自动写入 DSH 凭证库 `WB2API_GATEWAY_API_KEY` 供其按次解析。模型目录由 `scripts/generate-dsh-provider-models.mjs` 从 `/v1/models` 生成，网关目录变化后重新生成并更新插件。0.1.48 供应应用为「自动」时，模型目录只展示第一个有可用账号的应用（WorkBuddy 国内 → 国际 → 其余接入应用），路由仍按前缀自动分发。0.1.47 增加网关供应应用选择，默认为自动，选择后整个网关固定使用该应用并仅展示其模型；配合新版后端支持单账号积分耗尽后切换。0.1.46 增加 Antigravity 账号导入、OAuth 凭证管理与网关模型筛选；后端需使用支持 Antigravity 的版本。0.1.44 修复网关「复制地址」按钮在 DSH 深色主题下白底白字的问题，按钮配色跟随宿主主题。0.1.43 保持账号平台下拉框与页头操作按钮同行显示，避免平板窗口宽度下工具栏被拆成两行。0.1.42 将账号平台切换改为下拉选择，保留平台图标与账号数量；修复活动奖励页计算最早到期时间时的渲染递归循环；复用日期格式化器，签到历史与每账号月度积分改为一次汇总，减少切页和日志刷新时的主线程停顿。可在运行前端开发服务后执行 `node scripts/check-embed-performance.mjs`（仓库根目录，需要 Playwright），用 500 条日志和 20 个账号验证同源 iframe 内的连续切页。
 
 点击 DSH 侧栏的「ai-toolbox-gateway」直接打开面板。页面保留第二列侧栏菜单（账号、任务中心、积分明细、活动奖励、签到设置、定时任务、运行日志）以及自动签到概览和最近活动；窄窗口下页面内侧栏隐藏，改用底部导航切换；管理密钥入口在「签到设置」页。账号页保留余额和刷新积分。
 

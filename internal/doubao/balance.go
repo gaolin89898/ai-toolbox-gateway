@@ -17,13 +17,15 @@ import (
 // Quota describes one allowance window from the subscription management page.
 // Activity rewards and rolling subscription limits are separate allowances.
 type Quota struct {
-	Kind      string     `json:"kind"`
-	Name      string     `json:"name"`
-	Total     float64    `json:"total"`
-	Used      float64    `json:"used"`
-	Remaining float64    `json:"remaining"`
-	StartsAt  *time.Time `json:"starts_at,omitempty"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Kind       string     `json:"kind"`
+	Name       string     `json:"name"`
+	Feature    string     `json:"feature_group,omitempty"`
+	WindowType int        `json:"window_type,omitempty"`
+	Total      float64    `json:"total"`
+	Used       float64    `json:"used"`
+	Remaining  float64    `json:"remaining"`
+	StartsAt   *time.Time `json:"starts_at,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
 type Balance struct {
@@ -31,6 +33,25 @@ type Balance struct {
 	Known          bool
 	Plan           string
 	Quotas         []Quota
+}
+
+// availableBalance adds the monthly allowance to activity rewards. Rolling
+// windows constrain usage and must not be counted as additional credits.
+func availableBalance(credits, total float64, quotas []Quota) (float64, float64) {
+	monthly := map[string]Quota{}
+	for _, q := range quotas {
+		if q.Kind != "subscription" || q.WindowType != 4 {
+			continue
+		}
+		if previous, ok := monthly[q.Feature]; !ok || q.Remaining < previous.Remaining {
+			monthly[q.Feature] = q
+		}
+	}
+	for _, q := range monthly {
+		credits += q.Remaining
+		total += q.Total
+	}
+	return credits, total
 }
 
 type quotaSection struct {
@@ -163,6 +184,8 @@ func (c *Client) Balance(ctx context.Context, a *Account) (Balance, error) {
 						name = "订阅额度"
 						if window.Type == 2 {
 							name = "近 7 天"
+						} else if window.Type == 4 {
+							name = "套餐额度"
 						}
 					}
 				}
@@ -170,7 +193,7 @@ func (c *Client) Balance(ctx context.Context, a *Account) (Balance, error) {
 				if expires != nil && !expires.After(time.Now()) {
 					remaining = 0
 				}
-				balance.Quotas = append(balance.Quotas, Quota{Kind: section.kind, Name: name, Total: total, Used: used, Remaining: remaining, StartsAt: starts, ExpiresAt: expires})
+				balance.Quotas = append(balance.Quotas, Quota{Kind: section.kind, Name: name, Feature: group.Feature, WindowType: window.Type, Total: total, Used: used, Remaining: remaining, StartsAt: starts, ExpiresAt: expires})
 				if section.kind == "activity" && group.Feature == "doubao_activity_reward_quota" {
 					// Multiple windows constrain the same reward pool. Keep the
 					// tightest remaining limit instead of double counting it.

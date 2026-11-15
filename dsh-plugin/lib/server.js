@@ -56,7 +56,7 @@ function apiRoute(value) {
   return /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(path) ? value : null;
 }
 
-export function createHandler({ backendPort = 7863 } = {}, { onApiKey } = {}) {
+export function createHandler({ backendPort = 7863 } = {}, { onApiKey, onSupplierSaved } = {}) {
   if (!Number.isInteger(backendPort) || backendPort < 1 || backendPort > 65535) throw new Error('backendPort must be an integer from 1 to 65535');
   // Each machine keeps its Go service on loopback. DSH carries the registered
   // plugin route to the selected machine; this is never an arbitrary URL proxy.
@@ -79,9 +79,28 @@ export function createHandler({ backendPort = 7863 } = {}, { onApiKey } = {}) {
       });
       // 后端认可的密钥顺带同步进 DSH 凭证库（pi-ai 网关路由按次解析它）；
       // 401 说明密钥无效，不同步避免写坏凭证。
-      if (onApiKey && !isLogin(path, method) && upstream.ok && gatewayKey) onApiKey(gatewayKey).catch(() => {});
       if (upstream.status >= 300 && upstream.status < 400) return json(res, 502, '账号服务返回了不支持的重定向');
-      const response = Buffer.from(await upstream.arrayBuffer());
+      let response = Buffer.from(await upstream.arrayBuffer());
+      // Only a validated, successfully saved supplier selection can update DSH.
+      // Both local API requests and the remote bridge converge here.
+      let saved;
+      if (upstream.ok && onSupplierSaved && method === 'POST' && path === 'settings/gateway') {
+        try {
+          if (typeof JSON.parse(body?.toString() || '{}').gateway?.supplier === 'string') saved = JSON.parse(response);
+        } catch { /* Preserve non-JSON upstream responses and unrelated forms. */ }
+      }
+      if (saved) {
+        let sync;
+        try {
+          if (onApiKey) await onApiKey(gatewayKey);
+          sync = await onSupplierSaved(gatewayKey, controller.signal);
+        } catch (cause) {
+          sync = { status: 'error', message: cause?.message || '获取可用模型失败，请重新切换供应应用' };
+        }
+        response = Buffer.from(JSON.stringify({ ...saved, dsh_model_sync: sync }));
+      } else if (onApiKey && !isLogin(path, method) && upstream.ok && gatewayKey) {
+        onApiKey(gatewayKey).catch(() => {});
+      }
       if (res.destroyed) return;
       res.writeHead(upstream.status, {
         'content-type': upstream.headers.get('content-type') || 'application/json', 'cache-control': 'no-store',

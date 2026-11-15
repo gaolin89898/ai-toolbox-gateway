@@ -23,7 +23,7 @@ func (s unusedSupplier) GatewayCredential(context.Context, string) (gateway.Cred
 }
 
 func TestPanelSelectedSupplierDoesNotFallbackToOtherCatalogs(t *testing.T) {
-	live := livecfg.New(livecfg.Snapshot{GatewaySupplier: "loomy"})
+	live := livecfg.New(livecfg.Snapshot{GatewaySupplier: "minimax"})
 	p := New(Config{
 		Pool: pool.New(""), Upstream: upstream.New(), Live: live,
 		Providers: gateway.New(map[string]gateway.Source{"qoder": unusedSupplier{t}}),

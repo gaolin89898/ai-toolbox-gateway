@@ -10,9 +10,9 @@ import (
 func NormalizeSupplier(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch value {
-	case "", "auto":
+	case "", "auto", "loomy": // Retired supplier configurations fall back to automatic routing.
 		return "auto", nil
-	case "workbuddy-cn", "workbuddy-global", "loomy", "minimax", "qoder", "trae", "antigravity", "doubao":
+	case "workbuddy-cn", "workbuddy-global", "minimax", "qoder", "trae", "antigravity", "doubao":
 		return value, nil
 	default:
 		return "", fmt.Errorf("gateway.supplier: unsupported application %q", value)
@@ -35,11 +35,14 @@ func SupplierAllowsModel(supplier, model string) bool {
 }
 
 // SupplierPriority 自动模式目录展示的应用优先级，与前端供应应用下拉顺序一致。
-var SupplierPriority = []string{"workbuddy-cn", "workbuddy-global", "trae", "qoder", "minimax", "loomy", "antigravity", "doubao"}
+var SupplierPriority = []string{"workbuddy-cn", "workbuddy-global", "trae", "qoder", "minimax", "antigravity", "doubao"}
 
 // ResolveSupplierModel accepts bare names for the selected application, while
 // rejecting an explicit model from another application instead of falling back.
 func ResolveSupplierModel(supplier, model string) (string, error) {
+	if strings.HasPrefix(model, "loomy/") {
+		return "", fmt.Errorf("Loomy integration has been removed")
+	}
 	if supplier == "" || supplier == "auto" {
 		return model, nil
 	}

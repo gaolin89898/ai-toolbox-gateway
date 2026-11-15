@@ -16,6 +16,7 @@ const quiet = promise => promise?.catch(() => {});
       <a v-if="model.webLogins[provider].url" class="authorization-link" :href="model.webLogins[provider].url" target="_blank" rel="noopener noreferrer"><icon-export />打开 Google 授权页面</a>
       <div class="inline-between"><span><i class="status-dot" />{{ model.webLogins[provider].status }}</span><a-button type="text" @click="model.stopWebLogin(provider)">取消本次授权</a-button></div>
     </div>
+    <a-button v-if="provider === 'doubao'" type="outline" long :loading="model.busy.has('doubao-client-import')" @click="quiet(model.importDoubaoClient())">从豆包客户端导入登录态（用于工作模型转发）</a-button>
     <p class="dialog-login-status">{{ provider === 'antigravity' ? '使用 Google 账号登录并同意授权，无需填写 OAuth 凭证。' : '在打开的豆包网页中完成登录，无需复制 Cookie 或 Token。' }}</p>
     <p class="dialog-login-status">请在运行面板的电脑上通过 localhost 或 127.0.0.1 使用网页授权。</p>
   </div>

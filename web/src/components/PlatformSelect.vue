@@ -5,7 +5,6 @@ import workbuddyIcon from '../assets/platform-workbuddy.png';
 import traeIcon from '../assets/platform-trae.png';
 import qoderIcon from '../assets/platform-qoder.png';
 import minimaxIcon from '../assets/platform-minimax.png';
-import loomyIcon from '../assets/platform-loomy.png';
 import doubaoIcon from '../assets/platform-doubao.png';
 import antigravityIcon from '../assets/platform-antigravity.svg';
 
@@ -16,7 +15,6 @@ const platforms = [
   { id: 'trae', name: 'Trae', icon: traeIcon },
   { id: 'qoder', name: 'Qoder', icon: qoderIcon },
   { id: 'minimax', name: 'MiniMax', icon: minimaxIcon },
-  { id: 'loomy', name: 'Loomy', icon: loomyIcon },
   { id: 'antigravity', name: 'Antigravity', icon: antigravityIcon },
   { id: 'doubao', name: '豆包', icon: doubaoIcon },
 ];
@@ -27,7 +25,6 @@ const counts = computed(() => ({
   trae: props.model.traeAccounts.length,
   qoder: props.model.qoderAccounts.length,
   minimax: props.model.minimaxAccounts.length,
-  loomy: props.model.loomyAccounts.length,
   antigravity: props.model.antigravityAccounts.length,
   doubao: props.model.doubaoAccounts.length,
 }));

@@ -1,7 +1,8 @@
 import { createHandler, PREFIX } from './server.js';
+import { modelCatalogSyncer } from './model-sync.js';
 
 export const name = 'dsh-workbuddy-accounts';
-export const inject = ['webServer', 'credentials'];
+export const inject = ['webServer', 'credentials', 'llm', 'settings'];
 
 // cordis.patch.yml 里 pi-ai 网关路由（llm-pi-ai 行）的取密凭证名：pi-ai 每次
 // 请求经 ctx.credentials 解析该引用，取到本机 wb2api 管理密钥作 Bearer。
@@ -24,8 +25,24 @@ export function keySyncer(credentials) {
 
 export function apply(ctx, config = {}) {
   const syncGatewayKey = keySyncer(ctx.credentials);
-  const handler = createHandler(config, { onApiKey: syncGatewayKey });
+  const syncModels = modelCatalogSyncer(ctx, config);
+  const lifecycle = new AbortController();
+  const repairInputs = async ns => {
+    if (lifecycle.signal.aborted) return;
+    try {
+      const key = (await ctx.credentials.resolve(GATEWAY_KEY_REF))?.value;
+      if (key) await syncModels.repairInputs(key, ns, lifecycle.signal);
+    } catch {
+      if (!lifecycle.signal.aborted) ctx.logger.warn('AI 工具箱图片能力同步失败，请重新切换供应应用');
+    }
+  };
+  ctx.on('settings/document-updated', ns => { void repairInputs(ns); });
+  void repairInputs();
+  const handler = createHandler(config, { onApiKey: syncGatewayKey, onSupplierSaved: syncModels });
   // DSH matches the prefix itself or prefix + '/'; omit the trailing slash.
-  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: PREFIX.slice(0, -1), handler }),
+  ctx.effect(() => {
+    const dispose = ctx.webServer.register({ kind: 'prefix', path: PREFIX.slice(0, -1), handler });
+    return () => { lifecycle.abort(); return dispose(); };
+  },
     'workbuddy-accounts: frontend and local API bridge');
 }

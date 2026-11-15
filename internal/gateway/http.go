@@ -27,11 +27,6 @@ func (r *Router) headers(p string, c Credential) http.Header {
 	case "antigravity":
 		h.Set("Authorization", "Bearer "+c.Token)
 		h.Set("User-Agent", "antigravity/hub/2.29.1 (aidev_client; os_type=windows; arch=amd64; cl=1015941558)")
-	case "loomy":
-		h.Set("Authorization", "Bearer "+c.Token)
-		h.Set("token", c.Token)
-		h.Set("loomy-version", "0.9.39")
-		h.Set("traceparent", "00-"+strings.ReplaceAll(id(), "-", "")+"-"+strings.ReplaceAll(id(), "-", "")[:16]+"-01")
 	case "minimax":
 		h.Set("Authorization", "Bearer "+c.Token)
 		h.Set("x-api-key", c.Token)
@@ -91,7 +86,7 @@ func (r *Router) request(ctx context.Context, p, method, path string, c Credenti
 
 func (r *Router) fetchModels(ctx context.Context, p string, c Credential) ([]Model, error) {
 	if p == "doubao" {
-		return []Model{{ID: "doubao", Fields: map[string]any{"name": "豆包", "supports_images": false, "supports_tool_call": false, "supports_reasoning": false, "catalog_source": "web_builtin"}}}, nil
+		return doubaoWorkModels(), nil
 	}
 	if p == "minimax" {
 		return []Model{
@@ -130,26 +125,6 @@ func (r *Router) fetchModels(ctx context.Context, p string, c Credential) ([]Mod
 	switch p {
 	case "antigravity":
 		out = antigravityModels(root)
-	case "loomy":
-		for _, v := range arr(root["data"]) {
-			m := obj(v)
-			if str(m["id"]) == "" || str(m["type"]) != "chat" || str(m["protocol"]) != "openai_chat" {
-				continue
-			}
-			f := map[string]any{}
-			for _, k := range []string{"name", "context_length", "max_output_tokens"} {
-				if v, ok := m[k]; ok {
-					f[k] = v
-				}
-			}
-			cap := obj(m["capabilities"])
-			f["supports_reasoning"] = flag(cap["reasoning"])
-			f["supports_images"] = flag(cap["vision"])
-			f["supports_tool_call"] = flag(cap["function_calling"])
-			f["supported_efforts"] = m["reasoning_efforts"]
-			f["default_effort"] = m["default_reasoning_effort"]
-			out = append(out, Model{ID: str(m["id"]), Fields: f})
-		}
 	case "qoder":
 		if nested := obj(root["data"]); nested != nil {
 			root = nested

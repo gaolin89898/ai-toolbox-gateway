@@ -1,18 +1,38 @@
 package gateway
 
 import (
+	"bufio"
+	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
-	"errors"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	doubao "github.com/linguo2625469/workbuddy2api-panel/internal/doubaowork"
 )
 
-// doubaoChat maps text chat onto the doubao.com web protocol. Tool calls and
-// uploads require separate native APIs and must never be silently discarded.
+// doubaoWorkModels 把豆包工作的官方模型目录（model_item_key）映射为网关模型。
+func doubaoWorkModels() []Model {
+	out := []Model{}
+	for _, m := range doubao.WorkCatalog {
+		f := map[string]any{"name": m.Name, "catalog_source": "work_builtin"}
+		if m.ContextWindow > 0 {
+			f["context_length"] = m.ContextWindow
+		}
+		if len(m.Efforts) > 1 {
+			f["supports_reasoning"] = true
+			f["supported_efforts"] = m.Efforts
+			f["default_effort"] = m.DefaultEffort
+		}
+		out = append(out, Model{ID: m.ID, Fields: f})
+	}
+	return out
+}
+
+// doubaoChat 走豆包工作 /chat/completion 协议（客户端会话，model_item_key 选模型）。
 func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request map[string]any, emit Emit) error {
 	for _, key := range []string{"tools", "functions", "tool_choice", "function_call", "response_format"} {
 		if v := request[key]; v != nil {
@@ -23,7 +43,9 @@ func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request 
 	for _, v := range arr(request["messages"]) {
 		message := obj(v)
 		role := str(message["role"])
-		if role != "system" && role != "developer" && role != "user" && role != "assistant" {
+		switch role {
+		case "system", "developer", "user", "assistant":
+		default:
 			return failure(400, "doubao: unsupported message role")
 		}
 		if len(arr(message["tool_calls"])) > 0 || message["function_call"] != nil {
@@ -46,107 +68,201 @@ func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request 
 		}
 		texts = append(texts, role+": "+text)
 	}
-	content, _ := json.Marshal(map[string]any{"text": strings.Join(texts, "\n\n")})
-	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
-	deviceHash := sha256.Sum256([]byte("doubao/" + c.ID))
-	deviceID := strconv.FormatUint(7000000000000000000+binary.BigEndian.Uint64(deviceHash[:8])%1000000000000000000, 10)
-	body := map[string]any{
-		"messages":          []any{map[string]any{"content": string(content), "content_type": 2001, "attachments": []any{}, "references": []any{}}},
-		"completion_option": map[string]any{"is_regen": false, "with_suggest": false, "need_create_conversation": true, "launch_stage": 1, "is_replace": false, "is_delete": false, "message_from": 0, "use_deep_think": false, "use_auto_cot": false, "event_id": "0"},
-		"evaluate_option":   map[string]any{"web_ab_params": ""},
-		"section_id":        "26" + stamp[len(stamp)-16:],
-		"conversation_id":   "0", "local_conversation_id": "local_16" + stamp[len(stamp)-14:], "local_message_id": id(),
-	}
-	path := "/samantha/chat/completion?aid=497858&real_aid=497858&device_platform=web&language=zh&region=CN&sys_region=CN&samantha_web=1&use-olympus-account=1&version_code=20800&pc_version=2.44.0&pkg_type=release_version&device_id=" + deviceID + "&web_id=" + deviceID + "&tea_uuid=" + deviceID + "&web_tab_id=" + id()
-	resp, err := r.request(ctx, "doubao", "POST", path, c, body, m.ID)
+	prompt := strings.Join(texts, string(rune(10))+string(rune(10)))
+	effort := doubao.WorkEffort(m.ID, str(request["reasoning_effort"]))
+	payload := doubao.WorkPayload(prompt, m.ID, effort, c.DeviceID)
+	raw, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return failure(400, "invalid request parameters")
+	}
+	url := r.Bases["doubao"] + "/chat/completion?" + doubao.WorkQuery(c.DeviceID, c.WebID, c.Fingerprint)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(raw))
+	if err != nil {
+		return failure(502, "doubao: invalid endpoint")
+	}
+	req.Header = doubaoWorkHeaders(c)
+	resp, err := r.HTTP.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return failure(502, "doubao: upstream connection failed")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return failure(502, "doubao: upstream rejected request (HTTP "+strconv.Itoa(resp.StatusCode)+")")
+	}
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		return failure(502, "doubao: expected an event stream; check login or verification in doubao.com")
+		return failure(502, "doubao: expected an event stream; open the Doubao client and log in again")
 	}
 	completionID, created := "chatcmpl-"+id(), time.Now().Unix()
-	terminal := errors.New("doubao stream completed")
-	started, finished := false, false
+	started := false
 	chunk := func(delta map[string]any, finish any) error {
-		return emit(map[string]any{"id": completionID, "object": "chat.completion.chunk", "created": created, "model": m.ID, "choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}})
+		return emit(map[string]any{"id": completionID, "object": "chat.completion.chunk", "created": created, "model": m.ID,
+			"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}})
 	}
-	err = readSSE(resp.Body, func(event, data string) error {
+	previous := map[string]string{}
+	reasoningIDs := map[string]bool{}
+	event, data := "", []string{}
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64<<10), 4<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event:") {
+			event = strings.TrimSpace(line[6:])
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			data = append(data, strings.TrimLeft(line[5:], " "))
+			continue
+		}
+		if line != "" || len(data) == 0 {
+			continue
+		}
+		rawFrame := strings.Join(data, string(rune(10)))
+		data = nil
+		if rawFrame == "[DONE]" {
+			break
+		}
 		var frame map[string]any
-		if json.Unmarshal([]byte(data), &frame) != nil {
-			return failure(502, "doubao: malformed upstream event")
+		if json.Unmarshal([]byte(rawFrame), &frame) != nil {
+			continue
 		}
-		if num(frame["code"]) != 0 || event == "error" || frame["error"] != nil {
-			return failure(502, "doubao: upstream rejected stream; check login or verification in doubao.com")
+		if code := num(frame["error_code"]); code != 0 {
+			return failure(502, "doubao: upstream error "+strconv.Itoa(int(code)))
 		}
-		kind := int(num(frame["event_type"]))
-		var payload map[string]any
-		if kind == 2001 {
-			payload = obj(frame["event_data"])
-			if encoded, ok := frame["event_data"].(string); ok {
-				if json.Unmarshal([]byte(encoded), &payload) != nil {
-					return failure(502, "doubao: malformed event payload")
-				}
+		blocks := []map[string]any{}
+		collectWorkBlocks(frame, 0, false, 0, &blocks)
+		appendMode := event == "STREAM_CHUNK" || event == "CHUNK_DELTA"
+		for _, block := range blocks {
+			blockType := int(num(block["block_type"]))
+			blockID := str(block["block_id"])
+			if blockType == 10040 && blockID != "" {
+				reasoningIDs[blockID] = true
 			}
-			if payload == nil {
-				return failure(502, "doubao: missing event payload")
+			tb := obj(obj(block["content"])["text_block"])
+			text := str(tb["text"])
+			if text == "" {
+				continue
 			}
-			message := obj(payload["message"])
-			if raw := str(message["content"]); raw != "" {
-				var parsed any
-				text := raw
-				if json.Unmarshal([]byte(raw), &parsed) == nil {
-					if s, ok := parsed.(string); ok {
-						text = s
-					} else {
-						p := obj(parsed)
-						text = str(p["text"])
-						if text == "" {
-							text = str(obj(p["delta"])["text"])
-						}
-						if text == "" {
-							text = str(p["content"])
-						}
-					}
-				}
-				if text != "" {
-					if !started {
-						if err := chunk(map[string]any{"role": "assistant"}, nil); err != nil {
-							return err
-						}
-						started = true
-					}
-					key := "content"
-					if int(num(message["content_type"])) == 2008 {
-						key = "reasoning_content"
-					}
-					if err := chunk(map[string]any{key: text}, nil); err != nil {
-						return err
-					}
-				}
+			key := blockID
+			if key == "" {
+				key = "b" + strconv.Itoa(blockType)
 			}
-		}
-		if kind == 2003 || flag(payload["is_finish"]) {
+			before := previous[key]
+			var delta string
+			if appendMode {
+				previous[key] = before + text
+				delta = text
+			} else if strings.HasPrefix(text, before) {
+				previous[key] = text
+				delta = text[len(before):]
+			} else {
+				previous[key] = text
+				delta = text
+			}
+			if delta == "" {
+				continue
+			}
 			if !started {
-				return failure(502, "doubao: upstream returned no text")
+				if err := chunk(map[string]any{"role": "assistant"}, nil); err != nil {
+					return err
+				}
+				started = true
 			}
-			if err := chunk(map[string]any{}, "stop"); err != nil {
+			field := "content"
+			if blockType == 10040 || reasoningIDs[key] || strings.Contains(strings.ToLower(str(tb["icon_url"])), "deep_think") {
+				field = "reasoning_content"
+			}
+			if err := chunk(map[string]any{field: delta}, nil); err != nil {
 				return err
 			}
-			finished = true
-			return terminal
 		}
-		return nil
-	})
-	if errors.Is(err, terminal) {
-		return nil
+		if event == "SSE_REPLY_END" {
+			if int(num(frame["end_type"])) == 3 {
+				break
+			}
+			event = ""
+			continue
+		}
+		event = ""
 	}
-	if err != nil {
-		return err
+	if !started {
+		return failure(502, "doubao: upstream returned no text")
 	}
-	if !finished {
-		return failure(502, "doubao: upstream stream interrupted")
+	return chunk(map[string]any{}, "stop")
+}
+
+// collectWorkBlocks 递归收集带 block_type 与 content 的块对象。
+// user_type=1 的子树是用户消息回显（FULL_MSG_NOTIFY），整棵跳过。
+func collectWorkBlocks(v any, userType int, hasContext bool, depth int, out *[]map[string]any) {
+	if depth > 10 || v == nil {
+		return
 	}
-	return nil
+	switch t := v.(type) {
+	case []any:
+		for _, c := range t {
+			collectWorkBlocks(c, userType, hasContext, depth+1, out)
+		}
+	case map[string]any:
+		if raw, ok := t["user_type"]; ok {
+			userType = int(num(raw))
+			hasContext = true
+		}
+		if hasContext && userType == 1 {
+			return
+		}
+		if t["block_type"] != nil && t["content"] != nil {
+			*out = append(*out, t)
+		}
+		for _, c := range t {
+			collectWorkBlocks(c, userType, hasContext, depth+1, out)
+		}
+	}
+}
+
+// commonSuffixAppend 在上游改写快照时取新增尾部，避免重复输出。
+func commonSuffixAppend(before, now string) string {
+	n := 0
+	for n < len(before) && n < len(now) && before[n] == now[n] {
+		n++
+	}
+	if n >= len(now) {
+		return ""
+	}
+	return now[n:]
+}
+
+// doubaoWorkHeaders 构造豆包工作请求头（与客户端一致）。
+func doubaoWorkHeaders(c Credential) http.Header {
+	h := http.Header{}
+	h.Set("Accept", "text/event-stream")
+	h.Set("Content-Type", "application/json")
+	h.Set("Cookie", c.Token)
+	h.Set("Origin", "https://www.doubao.com")
+	h.Set("Referer", "https://www.doubao.com/chat/")
+	h.Set("User-Agent", doubao.WorkUA)
+	h.Set("agw-js-conv", "str")
+	h.Set("last-event-id", "undefined")
+	h.Set("x-lgw-req-sdk-type", "3")
+	h.Set("x-net-sdk-domain-dispatch", "1")
+	h.Set("x-request-id", id())
+	h.Set("x-ttnet-bypass-decompression", "1")
+	h.Set("x-flow-trace", "04-"+strings.ReplaceAll(id(), "-", ""))
+	if csrf := doubaoCSRF(c.Token); csrf != "" {
+		h.Set("x-tt-passport-csrf-token", csrf)
+	}
+	return h
+}
+
+// doubaoCSRF 从 Cookie 串中取出 passport_csrf_token。
+func doubaoCSRF(cookie string) string {
+	for _, part := range strings.Split(cookie, ";") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "passport_csrf_token=") {
+			return strings.TrimPrefix(part, "passport_csrf_token=")
+		}
+	}
+	return ""
 }

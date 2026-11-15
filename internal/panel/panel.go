@@ -35,7 +35,6 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/gateway"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/httpauth"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/livecfg"
-	"github.com/linguo2625469/workbuddy2api-panel/internal/loomy"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/minimax"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/qoder"
@@ -55,7 +54,6 @@ type Config struct {
 	Trae         *trae.Store
 	Qoder        *qoder.Store
 	Minimax      *minimax.Store
-	Loomy        *loomy.Store
 	Antigravity  *antigravity.Store
 	Doubao       *doubao.Store
 	Pool         *pool.Pool
@@ -217,7 +215,6 @@ func (p *Panel) routes() {
 	p.traeRoutes()
 	p.qoderRoutes()
 	p.minimaxRoutes()
-	p.loomyRoutes()
 	p.antigravityRoutes()
 	p.doubaoRoutes()
 	p.desktopRoutes()
@@ -473,7 +470,6 @@ func (p *Panel) overview(w http.ResponseWriter, r *http.Request) {
 		"trae_accounts":        p.traeAccounts(),
 		"qoder_accounts":       p.qoderAccounts(),
 		"minimax_accounts":     p.minimaxAccounts(),
-		"loomy_accounts":       p.loomyAccounts(),
 		"antigravity_accounts": p.antigravityAccounts(),
 		"doubao_accounts":      p.doubaoAccounts(),
 		"provider_totals":      p.cfg.Providers.Availability(),
@@ -629,16 +625,6 @@ func (p *Panel) creditHistory(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-		case "loomy":
-			if p.cfg.Loomy == nil {
-				break
-			}
-			for _, a := range p.cfg.Loomy.List() {
-				if a.UID == e.UID {
-					account = a.Nickname
-					break
-				}
-			}
 		}
 		out = append(out, map[string]any{
 			"time":     e.Time,
@@ -742,7 +728,7 @@ func (p *Panel) models(w http.ResponseWriter, r *http.Request) {
 }
 
 // listingSupplier 解析自动模式下的目录展示应用：WorkBuddy 国内 → 国际 →
-// Trae → Qoder → MiniMax → Loomy → Antigravity → 豆包，取第一个有启用账号的；
+// Trae → Qoder → MiniMax → Antigravity → 豆包，取第一个有启用账号的；
 // 一个都没有时返回 auto，维持原有的全量目录行为。
 func (p *Panel) listingSupplier() string {
 	if len(p.cfg.Pool.AvailableUIDsForRealm("cn")) > 0 {
@@ -1041,7 +1027,7 @@ func (p *Panel) accountRemove(w http.ResponseWriter, r *http.Request) {
 
 // checkinAll 手动触发全量签到（异步执行，进度看日志区/账号状态变化）。
 // 与自动排程共用同一执行入口：WorkBuddy 池签到 + CheckinHook（Trae / MiniMax /
-// Loomy 旁路签到）；Qoder 活动轮次由独立的 qoder 排程与补签路径负责。
+// 豆包）；Qoder 活动轮次由独立的 qoder 排程与补签路径负责，Antigravity 不做签到。
 func (p *Panel) checkinAll(w http.ResponseWriter, r *http.Request) {
 	if p.cfg.Scheduler == nil {
 		writeErr(w, http.StatusNotImplemented, "scheduler not available")

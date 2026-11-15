@@ -3,7 +3,7 @@
 //
 // 账号管理与网关共用同一份装配：
 //   - WorkBuddy Pool 与上游客户端（两种模式指向同一个实例）；
-//   - Trae / Qoder / MiniMax / Loomy / Antigravity / Doubao Store（每个平台只创建一次）；
+//   - Trae / Qoder / MiniMax / Antigravity / Doubao Store（每个平台只创建一次）；
 //   - 积分历史、面板日志环形缓冲、签到设置（account-settings.json）与调度器；
 //   - HTTP 服务与关闭流程（先停排程、刷池、再排空存储写入）。
 //
@@ -30,7 +30,6 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/doubao"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/gateway"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/livecfg"
-	"github.com/linguo2625469/workbuddy2api-panel/internal/loomy"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/minimax"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/panel"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
@@ -57,7 +56,6 @@ type appRuntime struct {
 	trae        *trae.Store
 	qoder       *qoder.Store
 	minimax     *minimax.Store
-	loomy       *loomy.Store
 	antigravity *antigravity.Store
 	doubao      *doubao.Store
 	providers   *gateway.Router
@@ -178,9 +176,6 @@ func newAppRuntime(configPath string, cfg *Config, gateway bool) (*appRuntime, e
 	if rt.minimax, err = minimax.Open(stateSibling(cfg.StateFile, "minimax-accounts.json"), nil); err != nil {
 		return nil, err
 	}
-	if rt.loomy, err = loomy.Open(stateSibling(cfg.StateFile, "loomy-accounts.json"), nil); err != nil {
-		return nil, err
-	}
 	if rt.doubao, err = doubao.Open(stateSibling(cfg.StateFile, "doubao-accounts.json"), nil); err != nil {
 		return nil, err
 	}
@@ -194,7 +189,7 @@ func newAppRuntime(configPath string, cfg *Config, gateway bool) (*appRuntime, e
 
 	// 签到入口（自动排程 / 启动补签 / 面板手动触发共用）：
 	// WorkBuddy 池签到由 scheduler 负责，Trae / MiniMax / 豆包 经 CheckinHook
-	// 同批执行（Loomy / Antigravity 不做签到）。
+	// 同批执行（Antigravity 不做签到）。
 	runSideCheckin := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
@@ -285,7 +280,6 @@ func newAppRuntime(configPath string, cfg *Config, gateway bool) (*appRuntime, e
 		Trae:          rt.trae,
 		Qoder:         rt.qoder,
 		Minimax:       rt.minimax,
-		Loomy:         rt.loomy,
 		Antigravity:   rt.antigravity,
 		Doubao:        rt.doubao,
 		CreditHistory: rt.creditHist,
@@ -364,7 +358,6 @@ func applySideRefresh(rt *appRuntime) {
 	rt.trae.SetRefreshEnabled(refresh)
 	rt.qoder.SetRefreshEnabled(refresh)
 	rt.minimax.SetRefreshEnabled(refresh)
-	rt.loomy.SetRefreshEnabled(refresh)
 	rt.doubao.SetRefreshEnabled(refresh)
 }
 
@@ -601,13 +594,6 @@ func (rt *appRuntime) observeSideProviderCredits(ctx context.Context) {
 			for _, account := range rt.minimax.List() {
 				if account.BalanceKnown {
 					rt.creditHist.ObserveProvider("minimax", account.UID, account.Credits)
-				}
-			}
-		}
-		if rt.loomy != nil {
-			for _, account := range rt.loomy.List() {
-				if account.BalanceKnown {
-					rt.creditHist.ObserveProvider("loomy", account.UID, account.Credits)
 				}
 			}
 		}

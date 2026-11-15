@@ -1005,7 +1005,7 @@ func TestAnnotateModelLabel(t *testing.T) {
 		want  string
 	}{
 		{"vendor and multiplier", map[string]any{"id": "cn:glm-5.3", "name": "GLM-5.3", "vendor": "智谱", "credits": "x0.79 credits"}, "GLM-5.3 · 智谱 · x0.79"},
-		{"provider fallback", map[string]any{"id": "loomy/chat", "name": "Chat", "provider": "loomy"}, "Chat · Loomy"},
+		{"provider fallback", map[string]any{"id": "qoder/chat", "name": "Chat", "provider": "qoder"}, "Chat · Qoder"},
 		{"unknown multiplier omitted", map[string]any{"id": "cn:model", "name": "Model", "vendor": "Vendor"}, "Model · Vendor"},
 		{"no metadata", map[string]any{"id": "cn:model", "name": "Model"}, "Model"},
 	}

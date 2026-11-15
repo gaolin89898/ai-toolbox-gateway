@@ -104,12 +104,67 @@ test('plugin registers one disposable route without starting the backend', () =>
   apply({
     webServer: { register(route) { registered = route; return () => { disposed = true; }; } },
     credentials: { resolve: async () => undefined, set: async () => {} },
+    on() {},
     effect(fn) { cleanup = fn(); },
   });
   assert.equal(registered.path, PREFIX.slice(0, -1));
   assert.equal(typeof registered.handler, 'function');
   cleanup();
   assert.equal(disposed, true);
+});
+
+test('successful supplier saves wait for catalog synchronization through local and remote routes', async t => {
+  const seen = [];
+  const backend = await serve(t, (_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"ok":true}');
+  });
+  const ui = await serve(t, createHandler({ backendPort: backend.port }, {
+    onApiKey: async key => { assert.equal(key, 'test-key'); seen.push('key'); },
+    onSupplierSaved: async (key, signal) => {
+      assert.equal(key, 'test-key');
+      assert.equal(signal.aborted, false);
+      assert.equal(seen.at(-1), 'key');
+      seen.push('models');
+      return { status: 'updated', count: 8 };
+    },
+  }));
+  const body = JSON.stringify({ gateway: { supplier: 'doubao' } });
+  for (const remote of [false, true]) {
+    const response = await fetch(ui.url + PREFIX + (remote ? 'bridge' : 'api/settings/gateway'), {
+      method: 'POST', headers: { authorization: 'Bearer test-key', 'content-type': 'application/json' },
+      body: remote ? JSON.stringify({ method: 'POST', path: 'settings/gateway', authorization: 'Bearer test-key',
+        body: Buffer.from(body).toString('base64') }) : body,
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, dsh_model_sync: { status: 'updated', count: 8 } });
+  }
+  assert.deepEqual(seen, ['key', 'models', 'key', 'models']);
+});
+
+test('only accepted supplier saves sync models, and catalog failure preserves a successful save', async t => {
+  let status = 200, calls = 0;
+  const backend = await serve(t, (_req, res) => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(status === 200 ? '{"ok":true}' : '{"error":"rejected"}');
+  });
+  const ui = await serve(t, createHandler({ backendPort: backend.port }, {
+    onSupplierSaved: async () => { calls++; throw new Error('模型服务暂不可用'); },
+  }));
+  const save = (body, key = 'test-key') => fetch(ui.url + PREFIX + 'api/settings/gateway', {
+    method: 'POST', headers: { authorization: key ? `Bearer ${key}` : '', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  assert.equal((await save({ gateway: { supplier: 'doubao' } }, '')).status, 401);
+  await save({ gateway: { request_timeout: '60s' } });
+  status = 400;
+  assert.equal((await save({ gateway: { supplier: 'invalid' } })).status, 400);
+  assert.equal(calls, 0);
+  status = 200;
+  const response = await save({ gateway: { supplier: 'doubao' } });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, dsh_model_sync: { status: 'error', message: '模型服务暂不可用' } });
+  assert.equal(calls, 1);
 });
 
 test('accepted keys sync into the DSH credential store once per value', async t => {

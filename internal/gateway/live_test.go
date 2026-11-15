@@ -21,7 +21,7 @@ func (s *staticSource) GatewayCredential(ctx context.Context, id string) (Creden
 }
 
 // Explicit opt-in only. Uses stored tokens without refreshing or modifying login
-// state. Example: GATEWAY_LIVE_PROVIDER=loomy go test ./internal/gateway -run TestLive -v
+// state. Example: GATEWAY_LIVE_PROVIDER=qoder go test ./internal/gateway -run TestLive -v
 func TestLive(t *testing.T) {
 	provider := os.Getenv("GATEWAY_LIVE_PROVIDER")
 	if provider == "" {
@@ -65,8 +65,6 @@ func TestLive(t *testing.T) {
 	model := os.Getenv("GATEWAY_LIVE_MODEL")
 	if model == "" {
 		switch provider {
-		case "loomy":
-			model = "spark-x2.6"
 		case "minimax":
 			model = "MiniMax-M3"
 		case "qoder":

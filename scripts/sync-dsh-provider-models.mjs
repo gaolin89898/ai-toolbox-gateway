@@ -13,7 +13,7 @@ const ROUTES = ['workbuddy-gateway', 'ai-toolbox'];
  * 定位：先找到 `workbuddy-gateway:` 键行，再向下找缩进更深的 `models:` 键行，
  * 块结束于缩进不大于 models 键的下一个非空行。
  */
-function replaceModels(text, blockLines) {
+function replaceModels(text, entries) {
   const lines = text.split(/\r?\n/);
   let routeAt = -1, route = null;
   for (const candidate of ROUTES) {
@@ -36,22 +36,28 @@ function replaceModels(text, blockLines) {
   for (; end < lines.length; end++) {
     const line = lines[end];
     if (line.trim() === '') continue;
-    if (line.match(/^\s*/)[0].length <= modelsIndent) break;
+    const indent = line.match(/^\s*/)[0].length;
+    // 块结束条件：缩进浅于 models 键；或与 models 键同级且不是序列条目
+    // （旧式写法允许 `- id:` 与 models: 同级，这类条目仍属于块内，不能提前截断，
+    //  否则会把新块插到旧块前面而不是整段替换，产生重复与缩进冲突导致 DSH 解析崩溃）。
+    const isSeqItem = line.trim().startsWith('- ');
+    if (indent < modelsIndent) break;
+    if (indent === modelsIndent && !isSeqItem) break;
   }
-  const next = [...lines.slice(0, modelsAt + 1), ...blockLines.split('\n'), ...lines.slice(end)];
+  const next = [...lines.slice(0, modelsAt + 1), ...renderModelsBlock(entries, modelsIndent).split('\n'), ...lines.slice(end)];
   return next.join('\n');
 }
 
 const entries = await fetchCatalog();
 const targets = [
-  { path: 'dsh-plugin/cordis.patch.yml', indent: 12, backup: false },
-  { path: `${process.env.USERPROFILE || process.env.HOME}/.dsh/profiles/desktop/cordis.patch.yml`, indent: 8, backup: true },
+  { path: 'dsh-plugin/cordis.patch.yml', backup: false },
+  { path: `${process.env.USERPROFILE || process.env.HOME}/.dsh/profiles/desktop/cordis.patch.yml`, backup: true },
 ];
 
 for (const target of targets) {
   const text = await readFile(target.path, 'utf8');
   if (target.backup) await copyFile(target.path, `${target.path}.bak-before-models-sync`);
-  const next = replaceModels(text, renderModelsBlock(entries, target.indent));
+  const next = replaceModels(text, entries);
   await writeFile(target.path, next);
   console.log(`已更新 ${target.path}（${entries.length} 个模型）`);
 }

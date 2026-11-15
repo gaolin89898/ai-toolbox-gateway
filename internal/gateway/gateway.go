@@ -21,7 +21,7 @@ type Account struct {
 	ID, Nickname string
 	Disabled     bool
 }
-type Credential struct{ ID, Nickname, UID, Token, RefreshToken, MachineID, DeviceID, AuthKind, ProjectID string }
+type Credential struct{ ID, Nickname, UID, Token, RefreshToken, MachineID, DeviceID, WebID, Fingerprint, AuthKind, ProjectID string }
 type Source interface {
 	GatewayAccounts() []Account
 	GatewayCredential(context.Context, string) (Credential, error)
@@ -114,13 +114,13 @@ func (r *Router) Availability() map[string]map[string]int {
 
 func New(sources map[string]Source) *Router {
 	return &Router{Sources: sources, HTTP: &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Bases: map[string]string{
-		"loomy": "https://loomyad.xunfei.cn/api/v1", "minimax": "https://agent.minimax.cn/mavis/api/v1/llm/v1", "qoder": "https://gateway.qoder.com.cn", "trae": "https://trae-api-cn.mchost.guru", "antigravity": "https://daily-cloudcode-pa.googleapis.com", "doubao": "https://www.doubao.com",
+		"minimax": "https://agent.minimax.cn/mavis/api/v1/llm/v1", "qoder": "https://gateway.qoder.com.cn", "trae": "https://trae-api-cn.mchost.guru", "antigravity": "https://daily-cloudcode-pa.googleapis.com", "doubao": "https://www.doubao.com",
 	}, MaxInFlight: 2, Cooldown: time.Minute, cache: map[string]catalog{}, flights: map[string]chan struct{}{}, states: map[string]*accountState{}, sticky: map[string]binding{}, signatures: map[string]string{}}
 }
 func Split(model string) (provider, bare string, ok bool) {
 	provider, bare, ok = strings.Cut(model, "/")
 	switch provider {
-	case "loomy", "minimax", "qoder", "trae", "antigravity", "doubao":
+	case "minimax", "qoder", "trae", "antigravity", "doubao":
 		return provider, bare, ok
 	default:
 		return "", "", false

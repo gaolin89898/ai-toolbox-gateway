@@ -80,7 +80,8 @@ func TestStoreCheckinReadsClientCheckinWhenRejected(t *testing.T) {
 		case "/alice/ug/campaign/landing/checkin":
 			w.Write([]byte(checkinRejectedBody))
 		case "/alice/ug/campaign/v3/detail/":
-			w.Write([]byte(checkinClientSignedFixture))
+			body := strings.ReplaceAll(checkinClientSignedFixture, "2026-11-14", CheckinDay(time.Now()))
+			w.Write([]byte(body))
 		case "/alice/ug/campaign/landing/get":
 			w.Write([]byte(checkinDesktopCardFixture))
 		case "/passport/account/info/v2/":
@@ -106,12 +107,13 @@ func TestStoreCheckinReadsClientCheckinWhenRejected(t *testing.T) {
 		t.Fatalf("client-signed fallback should succeed: %v", err)
 	}
 	got := s.List()[0]
-	if got.LastCheckinDate != "2026-11-14" || !got.CheckinDone || got.CheckinContinuous != 1 {
+	if got.LastCheckinDate != CheckinDay(time.Now()) || !got.CheckinDone || got.CheckinContinuous != 1 {
 		t.Fatalf("fallback state not recorded: %+v", got)
 	}
 }
 
 func TestStoreCheckinSurfacesPlatformSideError(t *testing.T) {
+	planPurchased := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/alice/ug/campaign/landing/checkin":
@@ -123,7 +125,11 @@ func TestStoreCheckinSurfacesPlatformSideError(t *testing.T) {
 		case "/passport/account/info/v2/":
 			w.Write([]byte(`{"message":"success","data":{"user_id":"88","screen_name":"豆包三号"}}`))
 		case "/alice/commerce/sale/subscription/quota/summary/":
-			w.Write([]byte(`{"code":0,"data":{"current_subscription":{"display":{"short_name":"免费体验"}},"incentive_quota_section":{"window_limit_groups":[]}}}`))
+			if planPurchased {
+				w.Write([]byte(standardQuotaFixture))
+			} else {
+				w.Write([]byte(quotaFixture))
+			}
 		default:
 			t.Errorf("unexpected upstream call: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
@@ -138,9 +144,15 @@ func TestStoreCheckinSurfacesPlatformSideError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.SetRefreshEnabled(true)
+	planPurchased = true
 	_, err = s.Action(context.Background(), a.UID, "checkin")
 	if err == nil || !strings.Contains(err.Error(), "平台侧") {
 		t.Fatalf("expected desktop-only message, got %v", err)
+	}
+	got := s.List()[0]
+	if got.Plan != "标准套餐" || got.Credits != 4100 || got.AvailableCredits != 6200 || got.LastError == "" || got.CheckinDone {
+		t.Fatalf("check-in failure must not leave the purchased plan stale: %+v", got)
 	}
 }
 

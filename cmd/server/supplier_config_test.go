@@ -14,7 +14,7 @@ import (
 )
 
 func TestSupplierConfigDefaultPersistenceAndHotApply(t *testing.T) {
-	for _, raw := range []string{`{}`, `{"gateway":{"supplier":""}}`} {
+	for _, raw := range []string{`{}`, `{"gateway":{"supplier":""}}`, `{"gateway":{"supplier":"loomy"}}`} {
 		cfg, err := ParseConfig([]byte(raw))
 		if err != nil || cfg.Gateway.Supplier != "auto" {
 			t.Fatalf("automatic default missing: cfg=%+v err=%v", cfg, err)
@@ -35,7 +35,7 @@ func TestSupplierConfigDefaultPersistenceAndHotApply(t *testing.T) {
 	live := livecfg.New(livecfg.Snapshot{})
 	p := pool.New("")
 	up, sch := upstream.New(), scheduler.New(scheduler.Config{})
-	for _, selected := range []string{"loomy", "workbuddy-global", "auto"} {
+	for _, selected := range []string{"qoder", "workbuddy-global", "auto"} {
 		restart, err := saveConfig([]byte(`{"gateway":{"supplier":"`+selected+`"}}`), path, live, p, up, sch)
 		if err != nil || live.Load().GatewaySupplier != selected {
 			t.Fatalf("selection not hot applied: %s restart=%v err=%v", selected, restart, err)

@@ -47,7 +47,7 @@ type CheckinStatus struct {
 func (c *Client) ugPost(ctx context.Context, a *Account, path, body string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+path+"?"+checkinQuery, strings.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("豆包签到请求参数无效")
+		return nil, fmt.Errorf("豆包活动请求参数无效")
 	}
 	req.Header.Set("Cookie", a.Cookie)
 	req.Header.Set("User-Agent", UserAgent)
@@ -57,16 +57,16 @@ func (c *Client) ugPost(ctx context.Context, a *Account, path, body string) ([]b
 	req.Header.Set("Agw-Js-Conv", "str")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("豆包签到请求失败，请检查网络后重试")
+		return nil, fmt.Errorf("豆包活动请求失败，请检查网络后重试")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, fmt.Errorf("豆包签到请求失败（HTTP %d）", resp.StatusCode)
+		return nil, fmt.Errorf("豆包活动请求失败（HTTP %d）", resp.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil || len(raw) > 1<<20 {
-		return nil, fmt.Errorf("豆包签到响应读取失败")
+		return nil, fmt.Errorf("豆包活动响应读取失败")
 	}
 	return raw, nil
 }
@@ -128,7 +128,7 @@ const CheckinDesktopOnlyCard = "web_pc_download_banner"
 // CheckinLandingCard 回读签到落地页路由，返回第一张卡片的代码；无卡片（网页
 // 可直接领取或已签）返回空串。
 func (c *Client) CheckinLandingCard(ctx context.Context, a *Account) (string, error) {
-	raw, err := c.ugPost(ctx, a, "/alice/ug/campaign/landing/get", `{"scene":"+CheckinGroupCode+","badge_counts":{"incentive":1}}`)
+	raw, err := c.ugPost(ctx, a, "/alice/ug/campaign/landing/get", `{"scene":"`+CheckinGroupCode+`","badge_counts":{"incentive":1}}`)
 	if err != nil {
 		return "", err
 	}

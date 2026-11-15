@@ -8,10 +8,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"syscall"
 	_ "time/tzdata" // Keep Asia/Shanghai available in standalone Windows builds.
 
@@ -24,6 +26,17 @@ import (
 // appVersion 服务版本（fork 版：统一账号面板 + 任务体系 + 可选网关），透出到
 // /panel/api/overview 与 /panel/api/capabilities。
 const appVersion = "1.14.0-unified"
+
+// openBackendLog 打开后台日志文件（单份超过 5 MB 时轮换为 .1），供无控制台构建使用。
+func openBackendLog(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if st, err := os.Stat(path); err == nil && st.Size() > 5<<20 {
+		_ = os.Rename(path, path+".1")
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+}
 
 // usagePathFor 由 state 文件路径推出用量文件路径：同目录、文件名 usage.json。
 // 这样 config 里改 state_file 时用量数据跟着走，不需要额外配置项。
@@ -44,6 +57,17 @@ func main() {
 	// 路径（计划任务 / VBS / WMI / 双击）没有控制台，进程保持完全静默无窗口。
 	attachParentConsole()
 	flag.CommandLine.SetOutput(os.Stderr)
+	// windowsgui 构建没有控制台：把日志与崩溃输出镜像到 data/backend.log，
+	// 静默退出时也能查到启动/退出记录与 panic 栈（否则 Windows 不产生任何事件）。
+	if backendLog, logErr := openBackendLog("data/backend.log"); logErr == nil {
+		defer backendLog.Close()
+		// 文件放前面：io.MultiWriter 遇到第一个写入错误就返回，windowsgui 下
+		// stderr 句柄无效，排在后面会把文件日志一起吞掉。
+		log.SetOutput(io.MultiWriter(backendLog, log.Writer()))
+		_ = debug.SetCrashOutput(backendLog, debug.CrashOptions{})
+		defer log.Printf("backend exit pid=%d", os.Getpid())
+		log.Printf("backend start pid=%d version=%s", os.Getpid(), appVersion)
+	}
 	cfgPath := flag.String("config", "config.json", "配置文件路径（默认当前目录 config.json；不存在时自动生成推荐配置）")
 	gateway := flag.Bool("gateway", false, "启用 WorkBuddy API 转发（默认仅运行账号管理与每日签到）")
 	desktop := flag.Bool("desktop", desktopDefault, "在桌面窗口中打开账号管理")

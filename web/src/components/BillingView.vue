@@ -12,7 +12,7 @@ const props = defineProps({ model: Object });
 const creditLimit = ref(500), creditLoading = ref(false), creditEntries = ref([]);
 const accountFilter = ref(''), flowFilter = ref('all');
 const accounts = computed(() => props.model.accounts);
-const historySupported = computed(() => ['workbuddy', 'trae', 'qoder', 'minimax', 'loomy'].includes(props.model.provider));
+const historySupported = computed(() => ['workbuddy', 'trae', 'qoder', 'minimax'].includes(props.model.provider));
 // 旧账本未标注品牌，均为 WorkBuddy 流水；WorkBuddy 按当前地区账号 UID 隔离。
 const providerEntries = computed(() => creditEntries.value.filter(entry =>
   (entry.provider || 'workbuddy') === props.model.provider && accounts.value.some(account => account.uid === entry.uid)

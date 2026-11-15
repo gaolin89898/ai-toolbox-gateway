@@ -17,10 +17,10 @@ import (
 type providerSource struct{}
 
 func (providerSource) GatewayAccounts() []gateway.Account {
-	return []gateway.Account{{ID: "loomy-test-account", Nickname: "test"}}
+	return []gateway.Account{{ID: "qoder-test-account", Nickname: "test"}}
 }
 func (providerSource) GatewayCredential(context.Context, string) (gateway.Credential, error) {
-	return gateway.Credential{ID: "loomy-test-account", Token: "private-provider-token", ProjectID: "private-project"}, nil
+	return gateway.Credential{ID: "qoder-test-account", UID: "qoder-test-account", Token: "private-provider-token", ProjectID: "private-project"}, nil
 }
 
 func TestProviderHTTPUsageLogHiddenAndHealth(t *testing.T) {
@@ -29,17 +29,17 @@ func TestProviderHTTPUsageLogHiddenAndHealth(t *testing.T) {
 			calls := 0
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
-				if r.URL.Path == "/models" {
+				if r.URL.Path == "/algo/api/v2/model/list" {
 					w.Header().Set("Content-Type", "application/json")
-					fmt.Fprint(w, `{"data":[{"id":"chat","type":"chat","protocol":"openai_chat"}]}`)
+					fmt.Fprint(w, `{"chat":[{"key":"chat","enable":true}]}`)
 					return
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				fmt.Fprint(w, sseOK)
 			}))
 			defer upstream.Close()
-			router := gateway.New(map[string]gateway.Source{"loomy": providerSource{}})
-			router.Bases["loomy"] = upstream.URL
+			router := gateway.New(map[string]gateway.Source{"qoder": providerSource{}})
+			router.Bases["qoder"] = upstream.URL
 			router.HTTP = upstream.Client()
 			logs := reqlog.New(reqlog.Config{})
 			defer logs.Close()
@@ -59,12 +59,12 @@ func TestProviderHTTPUsageLogHiddenAndHealth(t *testing.T) {
 				h.ServeHTTP(w, r)
 				return w
 			}
-			body := fmt.Sprintf(`{"model":"loomy/chat","stream":%v,"messages":[{"role":"user","content":"private prompt"}]}`, stream)
+			body := fmt.Sprintf(`{"model":"qoder/chat","stream":%v,"messages":[{"role":"user","content":"private prompt"}]}`, stream)
 			if w := request(body, ""); w.Code != 401 || calls != 0 {
 				t.Fatal("provider bypassed gateway authentication")
 			}
 			w := request(body, "gateway-key")
-			if w.Code != 200 || !strings.Contains(w.Body.String(), `"model":"loomy/chat"`) {
+			if w.Code != 200 || !strings.Contains(w.Body.String(), `"model":"qoder/chat"`) {
 				t.Fatalf("bad provider completion: %d %s", w.Code, w.Body.String())
 			}
 			if stream && !strings.HasSuffix(w.Body.String(), "data: [DONE]\n\n") {
@@ -72,14 +72,14 @@ func TestProviderHTTPUsageLogHiddenAndHealth(t *testing.T) {
 			}
 			snapshot := logs.Snapshot()
 			event := snapshot.Recent[0]
-			if !event.OK || event.Model != "loomy/chat" || event.Attempts != 1 || event.TotalTokens != 2 || event.Account == "" {
+			if !event.OK || event.Model != "qoder/chat" || event.Attempts != 1 || event.TotalTokens != 2 || event.Account == "" {
 				t.Fatalf("provider log incomplete: %+v", event)
 			}
 			if snapshot.Succeeded != 1 {
 				t.Fatal("success counter incorrect")
 			}
 			stats := u.Snapshot(24, nil)
-			if len(stats.ByRealm) != 1 || stats.ByRealm[0].Key != "loomy" || stats.ByRealm[0].TotalTokens != 2 {
+			if len(stats.ByRealm) != 1 || stats.ByRealm[0].Key != "qoder" || stats.ByRealm[0].TotalTokens != 2 {
 				t.Fatalf("provider usage missing: %+v", stats.ByRealm)
 			}
 			encoded, _ := json.Marshal(snapshot)
@@ -87,7 +87,7 @@ func TestProviderHTTPUsageLogHiddenAndHealth(t *testing.T) {
 				t.Fatal("prompt/token leaked to log")
 			}
 			before := calls
-			cfg.ModelsHidden = []string{"loomy/chat"}
+			cfg.ModelsHidden = []string{"qoder/chat"}
 			h = NewHandler(cfg)
 			if w := request(body, "gateway-key"); w.Code != 400 || calls != before {
 				t.Fatal("hidden provider model still forwarded")
@@ -105,8 +105,8 @@ func TestProviderStreamFailureIsNotLoggedAsSuccess(t *testing.T) {
 	for _, started := range []bool{false, true} {
 		t.Run(fmt.Sprint(started), func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/models" {
-					fmt.Fprint(w, `{"data":[{"id":"chat","type":"chat","protocol":"openai_chat"}]}`)
+				if r.URL.Path == "/algo/api/v2/model/list" {
+					fmt.Fprint(w, `{"chat":[{"key":"chat","enable":true}]}`)
 					return
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -116,14 +116,14 @@ func TestProviderStreamFailureIsNotLoggedAsSuccess(t *testing.T) {
 				fmt.Fprint(w, "event: error\ndata: {\"error\":\"private upstream error\"}\n\n")
 			}))
 			defer upstream.Close()
-			router := gateway.New(map[string]gateway.Source{"loomy": providerSource{}})
-			router.Bases["loomy"] = upstream.URL
+			router := gateway.New(map[string]gateway.Source{"qoder": providerSource{}})
+			router.Bases["qoder"] = upstream.URL
 			router.HTTP = upstream.Client()
 			logs := reqlog.New(reqlog.Config{})
 			defer logs.Close()
 			h := NewHandler(Config{Providers: router, RequestLog: logs})
 			w := httptest.NewRecorder()
-			h.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"loomy/chat","stream":true,"messages":[{"role":"user","content":"hi"}]}`)))
+			h.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"qoder/chat","stream":true,"messages":[{"role":"user","content":"hi"}]}`)))
 			if started {
 				if w.Code != 200 || !strings.Contains(w.Body.String(), "event: error") {
 					t.Fatal("missing in-stream error")

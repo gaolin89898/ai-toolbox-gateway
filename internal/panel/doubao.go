@@ -16,9 +16,29 @@ import (
 func (p *Panel) doubaoRoutes() {
 	p.webLoginRoutes("doubao")
 	p.mux.HandleFunc("POST /panel/api/doubao/accounts", p.withAuth(p.doubaoAdd))
+	p.mux.HandleFunc("GET /panel/api/doubao/accounts/{uid}/tasks", p.withAuth(p.doubaoTasks))
+	p.mux.HandleFunc("POST /panel/api/doubao/accounts/{uid}/tasks/claim", p.withAuth(p.doubaoTaskClaim))
 	p.mux.HandleFunc("POST /panel/api/doubao/accounts/{uid}/{action}", p.withAuth(p.doubaoAction))
 	p.mux.HandleFunc("POST /panel/api/doubao/balance_all", p.withAuth(p.doubaoRefreshAll))
 	p.mux.HandleFunc("POST /panel/api/doubao/checkin_all", p.withAuth(p.doubaoCheckinAll))
+	p.mux.HandleFunc("POST /panel/api/doubao/client_import", p.withAuth(p.doubaoClientImport))
+}
+
+// doubaoClientImport 从本机豆包客户端导入登录态（DPAPI 解密的 Cookie + 设备上下文），
+// 之后网关按豆包工作协议按官方 model_item_key 转发多模型。仅 Windows。
+func (p *Panel) doubaoClientImport(w http.ResponseWriter, r *http.Request) {
+	if !p.doubaoReady(w) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+	a, err := p.cfg.Doubao.ImportClient(ctx)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	log.Printf("doubao: 已从客户端导入登录态")
+	writeJSON(w, 200, map[string]any{"ok": true, "account": a})
 }
 func (p *Panel) doubaoAccounts() []doubao.Status {
 	if p.cfg.Doubao == nil {

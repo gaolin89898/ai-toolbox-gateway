@@ -65,7 +65,7 @@ func NormalizeHiddenModels(hidden []string) map[string]struct{} {
 		if m == "" {
 			continue
 		}
-		if prefix, _, ok := strings.Cut(m, "/"); ok && (prefix == "loomy" || prefix == "minimax" || prefix == "qoder" || prefix == "trae" || prefix == "antigravity") {
+		if prefix, _, ok := strings.Cut(m, "/"); ok && (prefix == "minimax" || prefix == "qoder" || prefix == "trae" || prefix == "antigravity") {
 			out[m] = struct{}{}
 			continue
 		}

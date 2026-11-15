@@ -7,7 +7,6 @@ import workbuddyIcon from '../assets/platform-workbuddy.png';
 import traeIcon from '../assets/platform-trae.png';
 import qoderIcon from '../assets/platform-qoder.png';
 import minimaxIcon from '../assets/platform-minimax.png';
-import loomyIcon from '../assets/platform-loomy.png';
 import antigravityIcon from '../assets/platform-antigravity.svg';
 import doubaoIcon from '../assets/platform-doubao.png';
 
@@ -31,7 +30,6 @@ const suppliers = [
   { id: 'trae', name: 'Trae', icon: traeIcon },
   { id: 'qoder', name: 'Qoder', icon: qoderIcon },
   { id: 'minimax', name: 'MiniMax', icon: minimaxIcon },
-  { id: 'loomy', name: 'Loomy', icon: loomyIcon },
   { id: 'antigravity', name: 'Antigravity', icon: antigravityIcon },
   { id: 'doubao', name: '豆包', icon: doubaoIcon },
 ];
@@ -276,7 +274,7 @@ const modelUsageRows = computed(() => {
 const configCache = ref(null);
 let configLoading;
 function applyGatewayConfig(config) {
-  const nextSupplier = config.gateway?.supplier || 'auto';
+  const nextSupplier = supplierById[config.gateway?.supplier] ? config.gateway.supplier : 'auto';
   if (nextSupplier !== supplier.value) {
     ++modelLoadVersion;
     models.value = null;
@@ -300,13 +298,16 @@ async function changeSupplier(value) {
   if (value === supplier.value || supplierSaving.value) return;
   supplierSaving.value = true;
   try {
-    await props.model.api('settings/gateway', { method: 'POST', body: JSON.stringify({ gateway: { supplier: value } }) });
+    const result = await props.model.api('settings/gateway', { method: 'POST', body: JSON.stringify({ gateway: { supplier: value } }) });
     ++modelLoadVersion;
     applyGatewayConfig({ ...configCache.value, gateway: { ...configCache.value?.gateway, supplier: value } });
     if (settings.value) settings.value.config = { ...settings.value.config, gateway: configCache.value.gateway };
     models.value = null;
     modelRealm.value = '';
-    Message.success('供应应用已切换为' + supplierById[value].name);
+    const message = '供应应用已切换为' + supplierById[value].name;
+    if (result.dsh_model_sync?.status === 'updated') Message.success(message + `，已同步 ${result.dsh_model_sync.count} 个可用模型，请回到会话选择模型`);
+    else if (result.dsh_model_sync?.status === 'error') Message.warning(message + '；' + result.dsh_model_sync.message);
+    else Message.success(message);
     if (section.value === 'models') await load('models');
   } catch (cause) { Message.error(cause.message); }
   finally { supplierSaving.value = false; }
@@ -632,7 +633,7 @@ async function saveSettings() {
       <section class="panel-card models-card">
         <div class="benefit-toolbar">
           <a-input v-model="modelSearch" allow-clear placeholder="搜索模型 ID / 名称 / 描述 / 厂商" aria-label="搜索模型"><template #prefix><icon-search /></template></a-input>
-          <a-select v-if="supplier === 'auto'" v-model="modelRealm" style="width: 140px" aria-label="按平台筛选"><a-option value="">全部平台</a-option><a-option value="cn">WorkBuddy CN</a-option><a-option value="global">WorkBuddy Global</a-option><a-option value="loomy">Loomy</a-option><a-option value="minimax">MiniMax</a-option><a-option value="qoder">Qoder</a-option><a-option value="trae">Trae</a-option><a-option value="antigravity">Antigravity</a-option><a-option value="doubao">豆包</a-option></a-select>
+          <a-select v-if="supplier === 'auto'" v-model="modelRealm" style="width: 140px" aria-label="按平台筛选"><a-option value="">全部平台</a-option><a-option value="cn">WorkBuddy CN</a-option><a-option value="global">WorkBuddy Global</a-option><a-option value="minimax">MiniMax</a-option><a-option value="qoder">Qoder</a-option><a-option value="trae">Trae</a-option><a-option value="antigravity">Antigravity</a-option><a-option value="doubao">豆包</a-option></a-select>
           <a-select v-model="modelSort" style="width: 160px" aria-label="排序方式"><a-option value="default">上游默认顺序</a-option><a-option value="credits">积分倍率低→高</a-option><a-option value="context">上下文大→小</a-option><a-option value="output">最大输出大→小</a-option><a-option value="name">模型 ID A→Z</a-option></a-select>
         </div>
         <a-scrollbar class="table-scroll" outer-class="table-wrap"><table>

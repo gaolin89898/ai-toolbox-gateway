@@ -36,7 +36,6 @@ var taskPrefixes = []string{
 	"trae:",
 	"qoder:",
 	"minimax:",
-	"loomy:",
 }
 
 // tsPrefixRe log 包默认 flags（日期 时间）产生的行首时间戳。

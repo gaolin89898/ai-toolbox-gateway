@@ -5,7 +5,7 @@
 <h1 align="center">WorkBuddy2API Panel</h1>
 
 <p align="center">
-  <b>WorkBuddy · Trae · Qoder · MiniMax · Loomy · Antigravity · 豆包 账号管理与每日签到 · 可选 OpenAI 兼容网关</b><br>
+  <b>WorkBuddy · Trae · Qoder · MiniMax · Antigravity · 豆包 账号管理与每日签到 · 可选 OpenAI 兼容网关</b><br>
   AI 工具箱 · Windows 桌面窗口 · DSH 插件 · 账号切换 · 成长任务 · 活动奖励 · 状态持久化
 </p>
 
@@ -20,19 +20,19 @@
 
 ## 使用声明（必读）
 
-本项目用于管理本人授权的 WorkBuddy / CodeBuddy、Trae、Qoder、MiniMax、Loomy、Antigravity 和 豆包 账号，以及在本机或私有环境接入个人工具。请遵守各平台服务条款，不得用于批量注册、共享或转售账号额度、卡密分发及其他违规用途。
+本项目用于管理本人授权的 WorkBuddy / CodeBuddy、Trae、Qoder、MiniMax、Antigravity 和 豆包 账号，以及在本机或私有环境接入个人工具。请遵守各平台服务条款，不得用于批量注册、共享或转售账号额度、卡密分发及其他违规用途。
 
 代码采用 MIT 协议，允许的使用和再分发范围以 [LICENSE](LICENSE) 为准；该许可不授予任何平台接口或服务的使用权，也不代表作者对第三方收费版本提供支持或背书。账号凭证、客户端登录快照和管理密钥应由本人保管。平台接口、活动规则和账号资格可能变化，执行结果以平台回读状态为准。
 
 ## 项目简介
 
-WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **WorkBuddy / Trae / Qoder / MiniMax / Loomy / Antigravity / 豆包** 七个平台的账号（Antigravity 不做签到、不提供积分余额；Loomy 展示积分余额；豆包展示订阅与额度，并支持每日签到），支持本机 Windows 客户端账号切换、WorkBuddy 成长任务与活动奖励。页面可通过浏览器、Windows 桌面窗口或 DSH 插件使用，账号和设置由 Go 后端持久保存。
+WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **WorkBuddy / Trae / Qoder / MiniMax / Antigravity / 豆包** 六个平台的账号（Antigravity 不做签到、不提供积分余额；豆包展示订阅与额度，并支持每日签到），支持本机 Windows 客户端账号切换、WorkBuddy 成长任务与活动奖励。页面可通过浏览器、Windows 桌面窗口或 DSH 插件使用，账号和设置由 Go 后端持久保存。
 
 直接运行程序进入账号管理模式；需要为个人工具提供 OpenAI 兼容接口时，使用同一程序加上 `-gateway`。
 
 | 启动方式 | 页面与能力 | 自动运行 |
 |---|---|---|
-| 默认账号管理 | AI 工具箱：账号、任务中心、活动奖励、签到设置、运行日志；支持七个平台与 WorkBuddy / Trae / Qoder 本机客户端切换 | 按北京时间执行签到、按设置刷新积分和启动补签；任务与活动奖励手动执行 |
+| 默认账号管理 | AI 工具箱：账号、任务中心、活动奖励、签到设置、运行日志；支持六个平台与 WorkBuddy / Trae / Qoder 本机客户端切换 | 按北京时间执行签到、按设置刷新积分和启动补签；任务与活动奖励手动执行 |
 | `-gateway` | 多平台聊天转发、用量、模型、配置与日志，以及 `/v1/*` 接口 | 按 `config.json` 中的排程运行签到、保活、旅行、活跃等任务 |
 
 默认模式不开放 `/v1/*`，不初始化网关用量统计、会话路由或 Redis。加上 `-gateway` 后，使用面板中已有账号提供多平台转发。
@@ -44,14 +44,13 @@ WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **
 | 平台 | 调用模型示例 | 实现与验证 |
 |---|---|---|
 | WorkBuddy | `cn:模型名`、`global:模型名` | 原有路由不变；裸名继续默认国内版 |
-| Loomy | `loomy/spark-x2.6` | 原生 OpenAI Chat；模型目录、聊天、工具调用和用量已实测 |
 | MiniMax | `minimax/MiniMax-M3` | 原生 Anthropic Messages 转换；聊天、工具调用和用量已实测；需要 OAuth / Bearer 登录，Cookie 仅供账号管理 |
 | Qoder CN | `qoder/fast` | COSY 签名接口与 SSE 信封解包；动态目录、聊天、工具调用和用量已实测 |
 | Trae CN | `trae/Doubao-Seed-Code` | IDE raw-v2 适配；目录已验证，当前实测账号均返回流内限流，聊天暂未通过真实成功验证 |
-| 豆包 | `doubao/doubao` | doubao.com 网页会话；文本聊天与流式 / 非流式转换已用模拟上游验证，真实账号对话已实测通过 |
+| 豆包 | `doubao/person-deepseek-v4-1-flash-261017` 等 | 豆包工作协议（桌面客户端会话）；按官方 `model_item_key` 选择 DeepSeek / Kimi / GLM / 豆包 2.1 等模型，文本流式与非流式已实测 |
 | Antigravity | `antigravity/模型ID` | Google OAuth + 原生 Gemini 协议转换；动态目录、文本、思考、Base64 图片和工具调用；具体模型 ID 以账号目录为准 |
 
-新增平台均通过 `POST /v1/chat/completions` 接入，支持 `stream: true/false`。模型目录按启用账号合并并缓存 5 分钟；Loomy 仅列出 OpenAI Chat 模型，Trae 排除辅助模型、自定义模型占位和隐藏配置。MiniMax 使用桌面端内置的 M3 / M3.1-Flash 目录，账号实际权限以上游响应为准。MiniMax 转换文本、图片、工具历史和思考内容；未适配参数（如 `response_format`）会返回 400。
+新增平台均通过 `POST /v1/chat/completions` 接入，支持 `stream: true/false`。模型目录按启用账号合并并缓存 5 分钟；Trae 排除辅助模型、自定义模型占位和隐藏配置。MiniMax 使用桌面端内置的 M3 / M3.1-Flash 目录，账号实际权限以上游响应为准。MiniMax 转换文本、图片、工具历史和思考内容；未适配参数（如 `response_format`）会返回 400。
 
 Antigravity 在「添加账号 → Antigravity」点击「开始网页授权」，使用 Google 账号登录并同意授权后，账号自动验证并保存，无需填写 OAuth 凭证。内置公开的桌面应用 OAuth 客户端配置，默认无需设置环境变量；如需使用自定义客户端，需同时设置与授权匹配的 `WB2A_ANTIGRAVITY_CLIENT_ID` 和 `WB2A_ANTIGRAVITY_CLIENT_SECRET`。网页授权需在运行面板的电脑上通过 localhost / 127.0.0.1 使用，回调占用本机 38121 端口。也可导入 CLIProxyAPI 单账号授权文件、Antigravity Tools 的嵌套 `token` 文件，或 `accounts` 数组导出；混合导出只接收 Antigravity 记录。添加时验证邮箱与项目；账号需已获得官方服务权限并完成项目初始化。凭证保存在 `state_file` 同目录的 `antigravity-accounts.json`，临期令牌自动续期并落盘。支持取消授权和同一账号重新授权；页面不返回令牌，不需要签到，不提供积分余额或本机客户端切换。
 
@@ -61,22 +60,22 @@ Antigravity 通过 `fetchAvailableModels` 读取实际目录，隐藏图片/视�
 
 豆包「订阅与额度管理」的活动赠送额度、近 7 天等订阅额度在网页授权后自动查询，也可手动点击「刷新额度」。账号页分别显示各项剩余量、已用量 / 总额与到期时间，顶部只汇总活动剩余额度，周期额度不与活动额度相加。这些额度与视频生成积分钱包不同，已使用真实账号核对。首次查询失败显示未知；后续失败保留上次成功结果，并显示查询时间和错误原因，不将失败视为余额为零。该额度接口不领取奖励或触发活动。豆包每日签到与网页 / 电脑版客户端共用同一套成长任务协议：账号页提供单号与「全部签到」，按任务组回读连续天数、累计签到天数与累计获得额度；服务端按天幂等，当天重复签到返回已签不重复发放，签到成功后按设置顺带刷新额度。协议使用公开网页接口独立实现，签到与状态解析已通过模拟上游测试，并已用真实账号核对回读字段。
 
-豆包网关调用 `doubao/doubao`，仅支持文本消息；多轮历史合并为带角色的文本，使用独立的网页会话生成。图片、工具调用和结构化输出请求会返回 400；网页协议不提供可靠的 token / 积分用量，面板不估算。网页风控或协议变化可能导致请求失败，需在豆包完成验证后重试；不会自动绕过验证码，也不会在流中断后重放生成。接入使用公开网页协议独立实现，账号验证、流事件转换和失败处理已通过模拟上游测试，真实账号对话已实测通过。
+豆包网关走**豆包工作**协议（`POST /chat/completion`），模型 ID 使用官方 `model_item_key`（如 `doubao/person-deepseek-v4-1-flash-261017`、`doubao/seed-lite-7b`、`doubao/person-kimi-k3-261111`），支持 `reasoning_effort` 思考档位；仅支持文本消息，多轮历史合并为文本。**需要先在本机豆包客户端登录**，然后在「添加账号 → 豆包」点「从豆包客户端导入登录态」：面板通过 DPAPI 解出客户端 Cookie 与设备上下文后保存账号，网关只向具备工作会话的账号选号。图片、工具调用和结构化输出请求会返回 400；工作协议不提供可靠的 token / 积分用量，面板不估算。网页风控或协议变化可能导致请求失败，需在豆包完成验证后重试；不会自动绕过验证码，也不会在流中断后重放生成。接入使用公开网页协议独立实现，账号验证、流事件转换和失败处理已通过模拟上游测试，真实账号对话已实测通过。
 
-新增平台使用各自的账号轮换、会话粘性、在途上限和失败冷却，复用 `pool.max_in_flight`（0 表示不限）与 `soft_rate` 设置；WorkBuddy 专属的积分权重、成本调度与 Redis 粘性规则仍只作用于 WorkBuddy。禁用账号不参与转发；MiniMax / Qoder / Trae / Antigravity 临期凭证在已有存储锁内刷新并持久化，推理过程不持有该锁。Loomy 会话过期后需在桌面端重新登录，再重新选择 Loomy 或点击「重新读取」；豆包 Cookie 失效后需重新登录豆包并更新凭证。
+新增平台使用各自的账号轮换、会话粘性、在途上限和失败冷却，复用 `pool.max_in_flight`（0 表示不限）与 `soft_rate` 设置；WorkBuddy 专属的积分权重、成本调度与 Redis 粘性规则仍只作用于 WorkBuddy。禁用账号不参与转发；MiniMax / Qoder / Trae / Antigravity 临期凭证在已有存储锁内刷新并持久化，推理过程不持有该锁。豆包 Cookie 失效后需重新登录豆包并更新凭证。
 
 只有明确的上游拒绝、且尚未输出时才会尝试其他账号；连接结果不明、断流或输出后错误不会重放生成。Trae 的 HTTP 200 流内错误会转换为真实失败，不计为成功请求。用量和请求日志按平台模型名记录；`/healthz`、`/status` 的 `provider_totals` 展示新增平台的本地调度状态。
 
-协议参考：[qoder2api-hub](https://github.com/shuishuipingan/qoder2api-hub)、[Trae2api-cn](https://github.com/autumnsentiment/Trae2api-cn)（MIT）、[antigravityProxyGo](https://github.com/weilimao/antigravityProxyGo) 的公开接口信息，以及本机 Loomy / MiniMax 原生客户端。Antigravity 适配独立实现，不包含参考项目的源代码。许可声明见 `internal/gateway/NOTICE`。
+协议参考：[qoder2api-hub](https://github.com/shuishuipingan/qoder2api-hub)、[Trae2api-cn](https://github.com/autumnsentiment/Trae2api-cn)（MIT）、[antigravityProxyGo](https://github.com/weilimao/antigravityProxyGo) 的公开接口信息，以及本机 MiniMax 原生客户端。Antigravity 适配独立实现，不包含参考项目的源代码。许可声明见 `internal/gateway/NOTICE`。
 
 ## 核心能力
 
 | 能力 | 说明 |
 |---|---|
-| 多平台账号 | WorkBuddy 浏览器授权与 Cockpit JSON 导入；Trae 国内版直接登录、凭证及备份导入；Qoder 国内版浏览器授权或 PAT；MiniMax 国内版粘贴 Cookie / 令牌；Loomy（讯飞）选择平台时自动读取本机桌面端登录配置；Antigravity 与豆包直接网页授权，无需填写 OAuth 凭证 |
-| 积分与每日签到 | 单号 / 全部签到、余额刷新、停用 / 启用、备注；每日 09:00 / 21:00 默认时刻可修改，Qoder 按 10:00 活动轮次处理；Loomy 不做签到，每日积分由桌面端自动发放 |
+| 多平台账号 | WorkBuddy 浏览器授权与 Cockpit JSON 导入；Trae 国内版直接登录、凭证及备份导入；Qoder 国内版浏览器授权或 PAT；MiniMax 国内版粘贴 Cookie / 令牌；Antigravity 与豆包直接网页授权，无需填写 OAuth 凭证 |
+| 积分与每日签到 | 单号 / 全部签到、余额刷新、停用 / 启用、备注；每日 09:00 / 21:00 默认时刻可修改，Qoder 按 10:00 活动轮次处理 |
 | 本机客户端切换 | Windows WorkBuddy / WorkBuddy AI、Trae CN、Qoder CN；登录态备份、重启后身份核验和失败回滚，支持自定义安装目录和 Qoder 更新目录 |
-| 成长任务与活动奖励 | WorkBuddy 国内版个人账号扫描待办、执行全部待办、查看队列、领取奖励；企业身份按实际账号属性判断，执行后回读进度 |
+| 成长任务与活动奖励 | WorkBuddy 国内版个人账号扫描待办、执行全部待办、查看队列、领取奖励；豆包工作任务列表、签到、达标奖励及累计额度奖励领取，操作后回读状态 |
 | 状态持久化 | 凭证、账号状态、备注和签到设置保存在本地；网关模式额外支持用量归档及可选 Upstash Redis 镜像 |
 | 页面与 DSH 插件 | Vue / Arco Design 页面，适配深浅色和移动布局；DSH「AI 工具箱」使用原生下拉菜单，主题与 Arco 滚动条跟随宿主 |
 | OpenAI 兼容网关 | `-gateway` 下提供聊天补全、模型列表及 Anthropic Messages 兼容联网搜索；流式 / 非流式、推理内容、工具调用和模型档位兼容 |
@@ -98,24 +97,13 @@ MiniMax 国内版（agent.minimaxi.com，实际跳转 agent.minimax.cn）已完�
 
 实现依据来自本机 MiniMax Code 桌面端（`AppData\Roaming\MiniMax/logs` 与安装目录 asar 中的 TypeScript 源码）；若站点调整签名盐值或端点，对照桌面端新版本更新 `internal/minimax/client.go` 顶部常量即可。
 
-## Loomy 接入
-
-Loomy（科大讯飞「AI 工作搭子」桌面端）已接入：账号管理与积分余额查询；不做签到，每日积分由桌面端自动发放（约 5000 积分/日）。
-
-| 能力 | 实现方式 |
-|---|---|
-| 账号读取 | 在平台下拉框中选择 Loomy 即自动读取本机已登录桌面端的 `C:\Users\Public\Loomy\<用户哈希>\userData\auth-session.json`（仅限本机请求；多个用户目录并存时，按文件修改时间取**最近写入**的一份）；无需手动添加账号或粘贴凭证，重新登录或更换账号后可点击「重新读取」 |
-| 登录边界 | 桌面端登录依赖短信验证与 HMAC 签名，面板不仿造登录；session 失效（业务码 100002）时请在 Loomy 桌面端重新登录后重新选择 Loomy 或点击「重新读取」 |
-| 每日奖励 | 面板不签到、不补领：每日积分由 Loomy 桌面端自动发放（约 5000 积分/日），面板仅通过积分余额查询展示结果 |
-| 积分余额 | 个人口径：`GET /api/v2/points/records`（个人流水）响应根部的 `balance`（桌面端「积分」页余额同源）。团队口径 `GET /api/v1/team-points/balance` 仅对已切换团队的账号有效，个人账号返回 100001「当前未切换到团队」 |
-
-积分 API（`https://loomyad.xunfei.cn`，即桌面端加密配置 `resources/.env.prod` 的 `LOOMY_POINTS_BASE_URL` 生产地址）无需签名，鉴权仅自定义头 `token: <session>`，业务信封 `{code, desc, data}`（`000000` 成功）。注意桌面端登录颁发的是生产 token：打到测试环境 `ossptest.voicecloud.cn` 会返回业务码 100002「登录已失效」，并非真实掉登录。协议依据为本机 Loomy 桌面端 `resources/app.asar.unpacked/electron/`（`points-service.js`、`pet/pet-work-service.js`，未压缩主进程源码）；本地进度按 `sha256(userid)` 分桶（已用本机真实 userKey 校验）。若 Loomy 调整端点或档位配置，对照新版桌面端更新 `internal/loomy/client.go`。
-
 ## 成长任务与活动奖励
 
 ## 成长任务与活动奖励
 
 WorkBuddy 国内版个人账号可在「任务中心」扫描待办、执行单项或全部待办、接受任务及领取奖励。执行会先确认，部分动作会发起真实模型请求并消耗积分；后端等待异步计分并回读任务进度，达标后领取奖励。任务清单、奖励和账号资格以平台当前返回结果为准，Trae / Qoder 暂未接入成长任务。
+
+豆包账号可在「任务中心」查看豆包工作活动的每日签到、工作任务、领域选择、文档／表格／PPT、定时提醒及累计额度奖励。列表和奖励金额通过活动 V3 接口实时读取；支持单项签到、单项领奖及当前账号批量领取已达标奖励。工作类任务需在对应豆包账号内实际完成，面板提供官方推荐提示词和完成指引，回到页面可刷新进度。累计额度仅代表活动累计获得值，不是剩余额度；领奖前重新读取平台任务实例，领奖后核验已领取状态，并尝试刷新余额。未达标、未知状态、停用账号和重复领取均有门控；平台错误会如实展示。
 
 ### 任务覆盖与奖励
 
@@ -412,7 +400,7 @@ curl -s http://localhost:7863/v1/search/messages \
 | `pool.idle_weight_per_hour` | `0.5` | 闲置补偿：每小时未使用 +0.5 权重 |
 | `pool.idle_weight_max` | `5.0` | 闲置补偿权重封顶 |
 | `pool.strategy.domestic` | `single_account` | 国内版账号池调度：`single_account` / `weighted_random` / `round_robin` / `sequential_exhaust`，支持热更新 |
-| `gateway.supplier` | `auto` | 供应应用：`auto` / `workbuddy-cn` / `workbuddy-global` / `loomy` / `minimax` / `qoder` / `trae` / `antigravity` / `doubao`；网关页左上角选择后保存并热生效。固定应用时，面板与 `/v1/models` 仅列该应用模型；裸模型名交由该应用，其他应用的显式模型前缀返回 400，不回退。`auto` 保持按模型前缀路由，目录合并各应用。 |
+| `gateway.supplier` | `auto` | 供应应用：`auto` / `workbuddy-cn` / `workbuddy-global` / `minimax` / `qoder` / `trae` / `antigravity` / `doubao`；网关页左上角选择后保存并热生效。固定应用时，面板与 `/v1/models` 仅列该应用模型；裸模型名交由该应用，其他应用的显式模型前缀返回 400，不回退。`auto` 保持按模型前缀路由，目录合并各应用。 |
 | `pool.strategy.international` | `single_account` | 国际版账号池独立调度策略，同上；不改变既有地区路由 |
 | `pool.account_order.domestic` / `international` | `[]` | 对应地区的 UID 优先顺序；未列出账号按 UID 排序追加；只用于轮询和顺序耗尽 |
 | `pool.prefer_expiring` | `true` | 快过期积分加权：窗口内仍有有效快过期批次的账号，选号权重 ×3（虚拟实例）；不按到期时间排序、与批次金额无关；是软偏好，弱于会话粘性与模型成本分层（#101） |

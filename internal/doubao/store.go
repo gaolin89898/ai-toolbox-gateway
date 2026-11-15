@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	doubaoWork "github.com/linguo2625469/workbuddy2api-panel/internal/doubaowork"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/gateway"
 )
 
@@ -22,6 +23,9 @@ type Account struct {
 	AccountUID        string    `json:"account_uid"`
 	Nickname          string    `json:"nickname"`
 	Cookie            string    `json:"cookie"`
+	DeviceID          string    `json:"device_id,omitempty"`
+	WebID             string    `json:"web_id,omitempty"`
+	Fingerprint       string    `json:"fingerprint,omitempty"`
 	Disabled          bool      `json:"disabled"`
 	VerifiedAt        time.Time `json:"verified_at"`
 	Credits           float64   `json:"credits"`
@@ -54,15 +58,19 @@ type Status struct {
 	BalanceKnown      bool      `json:"balance_known"`
 	Credits           float64   `json:"credits"`
 	Total             float64   `json:"credits_total"`
+	AvailableCredits  float64   `json:"available_credits"`
+	AvailableTotal    float64   `json:"available_total"`
 	Quotas            []Quota   `json:"quotas"`
 	Plan              string    `json:"plan"`
 	BalanceUpdatedAt  time.Time `json:"balance_updated_at"`
 	VerifiedAt        time.Time `json:"verified_at"`
+	WorkReady         bool      `json:"work_ready"`
 	LastError         string    `json:"last_error,omitempty"`
 }
 
 func status(a Account) Status {
-	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "doubao", Realm: "cn", Disabled: a.Disabled, VerifiedAt: a.VerifiedAt, CheckinSupported: true, CheckinDone: a.LastCheckinDate != "" && a.LastCheckinDate == CheckinDay(time.Now()), LastCheckinDate: a.LastCheckinDate, CheckinContinuous: a.CheckinContinuous, CheckinTotalDays: a.CheckinTotalDays, CheckinPoints: a.CheckinPoints, Credits: a.Credits, Total: a.Total, Quotas: append([]Quota{}, a.Quotas...), Plan: a.Plan, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, LastError: a.LastError}
+	available, total := availableBalance(a.Credits, a.Total, a.Quotas)
+	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "doubao", Realm: "cn", Disabled: a.Disabled, VerifiedAt: a.VerifiedAt, CheckinSupported: true, CheckinDone: a.LastCheckinDate != "" && a.LastCheckinDate == CheckinDay(time.Now()), LastCheckinDate: a.LastCheckinDate, CheckinContinuous: a.CheckinContinuous, CheckinTotalDays: a.CheckinTotalDays, CheckinPoints: a.CheckinPoints, WorkReady: a.DeviceID != "", Credits: a.Credits, Total: a.Total, AvailableCredits: available, AvailableTotal: total, Quotas: append([]Quota{}, a.Quotas...), Plan: a.Plan, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, LastError: a.LastError}
 }
 
 type Store struct {
@@ -185,6 +193,9 @@ func (s *Store) Add(ctx context.Context, a Account, expected string) (Status, er
 		if old.AccountUID != a.AccountUID {
 			return Status{}, fmt.Errorf("新凭证属于另一个豆包账号，请单独添加")
 		}
+		if a.DeviceID == "" {
+			a.DeviceID, a.WebID, a.Fingerprint = old.DeviceID, old.WebID, old.Fingerprint
+		}
 		a.ID, a.Disabled = old.ID, old.Disabled
 		a.Credits, a.BalanceKnown, a.BalanceUpdatedAt = old.Credits, old.BalanceKnown, old.BalanceUpdatedAt
 		a.Total, a.Quotas, a.Plan = old.Total, old.Quotas, old.Plan
@@ -275,6 +286,11 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, error) {
 						if strings.Contains(checkinErr.Error(), "710010702") {
 							checkinErr = fmt.Errorf("平台签到服务对该账号返回系统错误（710010702）：在豆包客户端内点「立即签到」也一样失败，属平台侧账号活动异常；面板每天自动重试，平台恢复后会自动签到并计入额度")
 						}
+						// Quota queries remain usable when the separate check-in
+						// service fails, including after a subscription purchase.
+						if s.refreshEnabled.Load() {
+							_ = s.refreshBalance(ctx, a)
+						}
 						a.LastError = checkinErr.Error()
 						if commitErr := s.commit(accounts); commitErr != nil {
 							return Status{}, commitErr
@@ -334,10 +350,25 @@ func (s *Store) RunAll(ctx context.Context, action string) []string {
 	return failures
 }
 
+// ImportClient 从本机豆包客户端导入登录态（DPAPI 解密的 Cookie 与设备上下文），
+// 导入后网关即可使用豆包工作协议转发模型。
+func (s *Store) ImportClient(ctx context.Context) (Status, error) {
+	sess, err := doubaoWork.ImportClientSession()
+	if err != nil {
+		return Status{}, err
+	}
+	return s.Add(ctx, Account{Cookie: sess.Cookie, DeviceID: sess.DeviceID, WebID: sess.WebID, Fingerprint: sess.Fingerprint}, "")
+}
+
 func (s *Store) GatewayAccounts() []gateway.Account {
 	out := []gateway.Account{}
-	for _, a := range s.List() {
-		out = append(out, gateway.Account{ID: a.UID, Nickname: a.Nickname, Disabled: a.Disabled})
+	for _, a := range s.snapshot() {
+		// 豆包工作协议需要客户端设备上下文；网页 Cookie 账号没有该上下文，
+		// 转发时会被上游拒绝，因此不参与网关选号。
+		if a.DeviceID == "" {
+			continue
+		}
+		out = append(out, gateway.Account{ID: a.ID, Nickname: a.Nickname, Disabled: a.Disabled})
 	}
 	return out
 }
@@ -348,7 +379,8 @@ func (s *Store) GatewayCredential(ctx context.Context, id string) (gateway.Crede
 	}
 	for _, a := range s.snapshot() {
 		if a.ID == id && !a.Disabled {
-			return gateway.Credential{ID: a.ID, Nickname: a.Nickname, UID: a.AccountUID, Token: a.Cookie}, nil
+			return gateway.Credential{ID: a.ID, Nickname: a.Nickname, UID: a.AccountUID, Token: a.Cookie,
+				DeviceID: a.DeviceID, WebID: a.WebID, Fingerprint: a.Fingerprint}, nil
 		}
 	}
 	return gateway.Credential{}, os.ErrNotExist
