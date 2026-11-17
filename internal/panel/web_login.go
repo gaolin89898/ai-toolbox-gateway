@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -17,15 +18,16 @@ import (
 )
 
 type webLoginState struct {
-	State    string `json:"state"`
-	Status   string `json:"status"`
-	URL      string `json:"url,omitempty"`
-	Done     bool   `json:"done"`
-	Error    string `json:"error,omitempty"`
-	Account  any    `json:"account,omitempty"`
-	provider string
-	created  time.Time
-	cancel   context.CancelFunc
+	State     string    `json:"state"`
+	Status    string    `json:"status"`
+	URL       string    `json:"url,omitempty"`
+	Done      bool      `json:"done"`
+	Error     string    `json:"error,omitempty"`
+	Account   any       `json:"account,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+	provider  string
+	created   time.Time
+	cancel    context.CancelFunc
 }
 
 type webLoginManager struct {
@@ -112,7 +114,7 @@ func (p *Panel) webLoginStart(w http.ResponseWriter, r *http.Request, provider s
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), loginTTL)
-	session := &webLoginState{State: hex.EncodeToString(id[:]), Status: "waiting", provider: provider, created: time.Now(), cancel: cancel}
+	session := &webLoginState{State: hex.EncodeToString(id[:]), Status: "waiting", ExpiresAt: time.Now().Add(loginTTL), provider: provider, created: time.Now(), cancel: cancel}
 	var run func(context.Context) (any, error)
 	cleanup := func() {}
 	if provider == "antigravity" {
@@ -124,13 +126,19 @@ func (p *Panel) webLoginStart(w http.ResponseWriter, r *http.Request, provider s
 		}
 		session.URL, cleanup = flow.URL, flow.Close
 		run = func(ctx context.Context) (any, error) {
-			a, err := flow.Wait(ctx)
+			a, err := flow.WaitWithProgress(ctx, func() { p.webLoginProgress(session, "exchanging") })
 			if err != nil {
 				return nil, err
 			}
 			p.webLoginSaving(session)
+			saveCtx, saveCancel := context.WithTimeout(ctx, 60*time.Second)
+			defer saveCancel()
 			a.Nickname = input.Nickname
-			return p.cfg.Antigravity.Add(ctx, a, input.UID)
+			account, err := p.cfg.Antigravity.Add(saveCtx, a, input.UID)
+			if err != nil {
+				return nil, fmt.Errorf("Antigravity 账号验证或保存失败：%w", err)
+			}
+			return account, nil
 		}
 	} else {
 		executable := m.find()
@@ -196,14 +204,20 @@ func (p *Panel) webLoginStart(w http.ResponseWriter, r *http.Request, provider s
 }
 
 func (p *Panel) webLoginSaving(session *webLoginState) {
+	p.webLoginProgress(session, "saving")
+}
+
+func (p *Panel) webLoginProgress(session *webLoginState, status string) {
 	p.webLogin.mu.Lock()
 	defer p.webLogin.mu.Unlock()
 	if !session.Done {
-		session.Status = "saving"
+		session.Status = status
+		log.Printf("%s: 网页授权阶段 %s", session.provider, status)
 	}
 }
 
 func (p *Panel) webLoginPoll(w http.ResponseWriter, r *http.Request, provider string) {
+	w.Header().Set("Cache-Control", "no-store")
 	if !localDesktopRequest(r) {
 		writeErr(w, 403, "网页授权状态仅限本机访问")
 		return

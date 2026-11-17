@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/linguo2625469/workbuddy2api-panel/internal/doubaowork"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/gateway"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/reqlog"
 	"github.com/linguo2625469/workbuddy2api-panel/internal/usage"
@@ -137,6 +138,50 @@ func TestProviderStreamFailureIsNotLoggedAsSuccess(t *testing.T) {
 			snapshot := logs.Snapshot()
 			if snapshot.Failed != 1 || snapshot.Recent[0].OK {
 				t.Fatal("stream failure counted as success")
+			}
+		})
+	}
+}
+
+func TestProviderContextLimitError(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			calls := 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer upstream.Close()
+			router := gateway.New(map[string]gateway.Source{"doubao": providerSource{}})
+			router.Bases["doubao"] = upstream.URL
+			router.HTTP = upstream.Client()
+			logs := reqlog.New(reqlog.Config{})
+			defer logs.Close()
+			h := NewHandler(Config{Providers: router, RequestLog: logs})
+			body, err := json.Marshal(map[string]any{
+				"model": "doubao/person-kimi-k3-1-pro-261111", "stream": stream,
+				"messages": []any{map[string]any{"role": "user", "content": strings.Repeat("x", doubaowork.WorkMaxInputCharacters+1)}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(string(body))))
+			var response struct {
+				Error struct{ Code, Message string }
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 400 || response.Error.Code != "context_length_exceeded" || !strings.Contains(response.Error.Message, "262144 characters") {
+				t.Fatalf("context limit error lost: %d %s", w.Code, w.Body.String())
+			}
+			if calls != 0 || router.Availability()["doubao"]["healthy"] != 1 {
+				t.Fatal("oversized request contacted upstream or cooled the account")
+			}
+			snapshot := logs.Snapshot()
+			if snapshot.Failed != 1 || snapshot.Recent[0].OK || snapshot.Recent[0].Status != 400 {
+				t.Fatal("context rejection was not logged as HTTP 400")
 			}
 		})
 	}

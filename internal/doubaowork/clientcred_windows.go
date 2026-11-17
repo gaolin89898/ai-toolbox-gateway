@@ -21,6 +21,7 @@ import (
 
 // ClientSession 是本机豆包客户端的登录态：Cookie 串 + 设备上下文。
 type ClientSession struct {
+	AccountUID  string
 	Cookie      string
 	DeviceID    string
 	WebID       string
@@ -34,24 +35,37 @@ func ImportClientSession() (ClientSession, error) {
 	if st, err := os.Stat(userData); err != nil || !st.IsDir() {
 		return ClientSession{}, fmt.Errorf("未找到豆包客户端数据目录，请先安装并登录豆包客户端")
 	}
-	key, err := localStateKey(filepath.Join(userData, "Local State"))
+	statePath := filepath.Join(userData, "Local State")
+	state, err := os.ReadFile(statePath)
+	if err != nil {
+		return ClientSession{}, fmt.Errorf("豆包客户端当前账号配置读取失败")
+	}
+	profile, uid, err := activeClientProfile(state)
+	if err != nil {
+		return ClientSession{}, err
+	}
+	key, err := localStateKey(statePath)
 	if err != nil {
 		return ClientSession{}, fmt.Errorf("豆包客户端密钥读取失败：%w", err)
 	}
-	var best map[string]string
-	for _, dir := range profileDirs(userData) {
-		cookies, err := readProfileCookies(filepath.Join(dir, "Network", "Cookies"), key)
-		if err != nil || cookies["sessionid"] == "" {
-			continue
-		}
-		if best == nil || len(cookies) > len(best) {
-			best = cookies
-		}
+	cookies, err := readProfileCookies(filepath.Join(userData, profile, "Network", "Cookies"), key)
+	if errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
+		return ClientSession{}, fmt.Errorf("豆包客户端正在占用当前账号登录态，请完全退出豆包客户端后重试导入（无需退出账号）")
 	}
-	if best == nil {
-		return ClientSession{}, fmt.Errorf("豆包客户端未登录：请先在客户端登录后重试")
+	if err != nil || cookies["sessionid"] == "" {
+		return ClientSession{}, fmt.Errorf("豆包客户端当前账号登录态读取失败，请在当前账号重新登录后重试")
 	}
-	session := ClientSession{Cookie: cookieHeader(best), Fingerprint: best["s_v_web_id"]}
+	// Import only the selected profile. Other profiles may retain valid sessions
+	// for different accounts; they must never be used as a fallback.
+	current, err := os.ReadFile(statePath)
+	if err != nil {
+		return ClientSession{}, fmt.Errorf("豆包客户端当前账号配置读取失败")
+	}
+	currentProfile, currentUID, err := activeClientProfile(current)
+	if err != nil || currentProfile != profile || currentUID != uid {
+		return ClientSession{}, fmt.Errorf("豆包客户端账号已切换，请重新导入")
+	}
+	session := ClientSession{AccountUID: uid, Cookie: cookieHeader(cookies), Fingerprint: cookies["s_v_web_id"]}
 	session.DeviceID, session.WebID = deviceContext(userData)
 	if session.DeviceID == "" {
 		return ClientSession{}, fmt.Errorf("未找到豆包客户端设备号，请在客户端完成一次对话后重试")
@@ -59,23 +73,34 @@ func ImportClientSession() (ClientSession, error) {
 	return session, nil
 }
 
-// profileDirs 列出 User Data 下的浏览器配置档目录。
-func profileDirs(userData string) []string {
-	entries, err := os.ReadDir(userData)
-	if err != nil {
-		return nil
+// activeClientProfile follows the client's last-used profile and preserves its
+// expected identity so the authenticated response can be checked before saving.
+func activeClientProfile(raw []byte) (string, string, error) {
+	var state struct {
+		Profile struct {
+			LastUsed  string `json:"last_used"`
+			InfoCache map[string]struct {
+				Saman struct {
+					UserID string `json:"user_id"`
+				} `json:"saman"`
+			} `json:"info_cache"`
+		} `json:"profile"`
 	}
-	out := []string{}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if name == "Default" || strings.HasPrefix(name, "Profile ") {
-			out = append(out, filepath.Join(userData, name))
-		}
+	if json.Unmarshal(raw, &state) != nil {
+		return "", "", fmt.Errorf("豆包客户端当前账号配置无效")
 	}
-	return out
+	name := state.Profile.LastUsed
+	valid := name == "Default"
+	if strings.HasPrefix(name, "Profile ") {
+		suffix := strings.TrimPrefix(name, "Profile ")
+		valid = suffix != "" && strings.Trim(suffix, "0123456789") == ""
+	}
+	info, exists := state.Profile.InfoCache[name]
+	uid := info.Saman.UserID
+	if !valid || !exists || uid == "" || strings.Trim(uid, "0") == "" || strings.Trim(uid, "0123456789") != "" {
+		return "", "", fmt.Errorf("无法确认豆包客户端当前账号，请在客户端登录并切换到要导入的账号后重试")
+	}
+	return name, uid, nil
 }
 
 // deviceContext 从 SDK 存储提取 device_id / web_id（标记后紧跟数字）。

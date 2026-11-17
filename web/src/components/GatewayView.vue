@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Alert as AAlert, Button as AButton, Empty as AEmpty, Input as AInput, InputPassword as AInputPassword, Message, Select as ASelect, Option as AOption, Scrollbar as AScrollbar, Switch as ASwitch, Textarea as ATextarea, Tooltip as ATooltip } from '@arco-design/web-vue';
+import { Alert as AAlert, Button as AButton, Empty as AEmpty, Input as AInput, InputPassword as AInputPassword, Message, Pagination as APagination, Select as ASelect, Option as AOption, Scrollbar as AScrollbar, Switch as ASwitch, Textarea as ATextarea, Tooltip as ATooltip } from '@arco-design/web-vue';
 import { IconCopy, IconLink, IconRefresh, IconSearch, IconArrowRight, IconStorage, IconSchedule, IconSwap, IconSettings, IconCodeSquare, IconFile, IconSave, IconThunderbolt, IconSafe, IconArrowRise } from '@arco-design/web-vue/es/icon';
 import { clockTime, formatNumber } from '../useAccounts';
 import workbuddyIcon from '../assets/platform-workbuddy.png';
@@ -22,6 +22,9 @@ const sections = [
   { id: 'settings', name: '网关设置' },
 ];
 const loading = ref(false);
+const liveLoadVersions = { usage: 0, requests: 0 };
+const pendingLiveLoads = new Map();
+let foregroundLoads = 0, disposed = false;
 const supplier = ref('auto'), supplierReady = ref(false), supplierSaving = ref(false);
 const suppliers = [
   { id: 'auto', name: '自动' },
@@ -49,6 +52,7 @@ const usageWindow = ref(24);
 const usageDim = ref('account');
 const modelSearch = ref(''), modelRealm = ref(''), modelSort = ref('default');
 const reqOutcome = ref(''), reqLimit = ref(100), reqRange = ref(0), reqQuery = ref('');
+const reqPage = ref(1), reqPageSize = ref(20), reqScrollbar = ref(null);
 const requests = ref(null), archiveState = ref(null);
 const requestMetrics = ref(null);
 const usagePeriod = computed(() => usageWindow.value === 24 ? '最近 24 小时' : `最近 ${usageWindow.value / 24} 天`);
@@ -59,20 +63,27 @@ function copyText(value, label = '已复制') {
   navigator.clipboard.writeText(value).then(() => Message.success(label)).catch(() => Message.error('复制失败'));
 }
 
-async function load(target = section.value) {
-  if (!props.model.capabilities?.gateway) return;
-  loading.value = true;
+async function load(target = section.value, { quiet = false } = {}) {
+  if (!props.model.capabilities?.gateway || disposed) return;
+  const live = target === 'usage' || target === 'requests';
+  if (quiet && pendingLiveLoads.has(target)) return;
+  const version = live ? ++liveLoadVersions[target] : 0;
+  if (live) pendingLiveLoads.set(target, version);
+  if (!quiet) { foregroundLoads++; loading.value = true; }
   try {
     if (target === 'usage') {
       const [u, feed, metrics] = await Promise.all([
         props.model.api('usage?hours=' + usageWindow.value),
-        props.model.api('request_logs?limit=8').catch(() => ({ entries: [] })),
+        props.model.api('request_logs?limit=8').catch(() => null),
         props.model.api('request_metrics').catch(() => null),
       ]);
+      if (disposed || version !== liveLoadVersions.usage || section.value !== target) return;
       usage.value = u;
-      feedRows.value = feed.entries || [];
-      archiveState.value = metrics?.archive || null;
-      requestMetrics.value = metrics;
+      if (feed) feedRows.value = feed.entries || [];
+      if (metrics) {
+        archiveState.value = metrics.archive || null;
+        requestMetrics.value = metrics;
+      }
     } else if (target === 'models') {
       if (!supplierReady.value && !await ensureConfig()) return;
       const version = ++modelLoadVersion;
@@ -88,8 +99,13 @@ async function load(target = section.value) {
         props.model.api('request_logs?' + params.toString()),
         props.model.api('request_metrics').catch(() => null),
       ]);
+      if (disposed || version !== liveLoadVersions.requests || section.value !== target) return;
       requests.value = logs;
-      archiveState.value = metrics?.archive || null;
+      reqPage.value = quiet ? Math.min(reqPage.value, Math.max(1, Math.ceil(requestRows.value.length / reqPageSize.value))) : 1;
+      if (metrics) {
+        archiveState.value = metrics.archive || null;
+        requestMetrics.value = metrics;
+      }
     } else if (target === 'settings') {
       const data = await props.model.api('settings/gateway');
       applyGatewayConfig(data.config || {});
@@ -97,29 +113,35 @@ async function load(target = section.value) {
       restartRequired.value = [];
       hydrate(data.config || {});
     }
-  } catch (cause) { Message.error(cause.message); }
-  finally { loading.value = false; }
+  } catch (cause) {
+    if (!quiet && !disposed && (!live || version === liveLoadVersions[target])) Message.error(cause.message);
+  } finally {
+    if (live && pendingLiveLoads.get(target) === version) pendingLiveLoads.delete(target);
+    if (!quiet) { foregroundLoads--; loading.value = foregroundLoads > 0; }
+  }
 }
 watch(section, value => {
-  if (value === 'usage' && !usage.value) load(value);
+  if (value === 'usage' || value === 'requests') load(value, { quiet: value === 'usage' ? !!usage.value : !!requests.value });
   else if (value === 'models' && !models.value) load(value);
-  else if (value === 'requests' && !requests.value) load(value);
   else if (value === 'settings' && !form.value) load(value);
 });
+function refreshLive() {
+  if (document.hidden || !['usage', 'requests'].includes(section.value)) return;
+  return load(section.value, { quiet: true });
+}
 let feedTimer;
 onMounted(() => {
   load(section.value);
-  feedTimer = setInterval(async () => {
-    if (section.value !== 'usage' || document.hidden) return;
-    const [feed, metrics] = await Promise.all([
-      props.model.api('request_logs?limit=8').catch(() => null),
-      props.model.api('request_metrics').catch(() => null),
-    ]);
-    if (feed) feedRows.value = feed.entries || [];
-    if (metrics) requestMetrics.value = metrics;
-  }, 5000);
+  feedTimer = setInterval(refreshLive, 5000);
+  document.addEventListener('visibilitychange', refreshLive);
+  window.addEventListener('focus', refreshLive);
 });
-onBeforeUnmount(() => clearInterval(feedTimer));
+onBeforeUnmount(() => {
+  disposed = true;
+  clearInterval(feedTimer);
+  document.removeEventListener('visibilitychange', refreshLive);
+  window.removeEventListener('focus', refreshLive);
+});
 
 // ── 网关状态卡（设计稿：单行 Status Top + 五段 Metrics）──────────
 const statusMetrics = computed(() => {
@@ -253,7 +275,8 @@ function xLabel(point, index, count) {
 }
 function pointTitle(point) { return `${point.t}\n输入 ${formatNumber(point.prompt_tokens)} · 输出 ${formatNumber(point.completion_tokens)}`; }
 function switchWindow(value) { usageWindow.value = value; load('usage'); }
-function outcomeName(row) { return ({ ok: '成功', http_error: 'HTTP 错误', stream_error: '流错误', interrupted: '中断', client_error: '客户端错误' })[row.outcome] || row.outcome || '--'; }
+function requestSucceeded(row) { return row.outcome === 'success' || row.outcome === 'ok'; }
+function outcomeName(row) { return ({ success: '成功', ok: '成功', http_error: 'HTTP 错误', stream_error: '流错误', interrupted: '中断', client_error: '客户端错误' })[row.outcome] || row.outcome || '--'; }
 
 // ── KPI 三段 + 模型用量表 + 运行参数（设计稿 Insights Row）──────
 const chartKpis = computed(() => {
@@ -370,13 +393,16 @@ const capabilityTags = row => [
 // ── 请求日志 ────────────────────────────────────────────────────
 const requestRows = computed(() => (requests.value?.entries || []).filter(row =>
   !reqQuery.value || [row.model, row.account, row.client_ip, row.user_agent, row.request_id, row.path].some(field => (field || '').toLowerCase().includes(reqQuery.value.toLowerCase()))));
+const requestPageRows = computed(() => requestRows.value.slice((reqPage.value - 1) * reqPageSize.value, reqPage.value * reqPageSize.value));
+watch([reqQuery, reqOutcome, reqRange, reqLimit, reqPageSize], () => { reqPage.value = 1; });
+watch([reqPage, reqPageSize], () => reqScrollbar.value?.scrollTo({ top: 0 }), { flush: 'post' });
 const requestSummary = computed(() => {
   const rows = requestRows.value;
-  const errors = rows.filter(row => row.outcome !== 'ok').length;
+  const errors = rows.filter(row => !requestSucceeded(row)).length;
   const ttfb = rows.filter(row => row.ttfb_ms);
   return [
     { label: '请求', value: formatNumber(rows.length), sub: '本次读取' },
-    { label: '成功', value: formatNumber(rows.length - errors), sub: 'outcome ok' },
+    { label: '成功', value: formatNumber(rows.length - errors), sub: '' },
     { label: '异常', value: formatNumber(errors), sub: rows.length ? (errors / rows.length * 100).toFixed(1) + '%' : '--' },
     { label: '平均 TTFB', value: ttfb.length ? Math.round(ttfb.reduce((sum, row) => sum + row.ttfb_ms, 0) / ttfb.length) + 'ms' : '--', sub: `${ttfb.length} 条记录` },
     { label: '归档', value: archiveState.value?.enabled ? '开启' : '关闭', sub: archiveState.value?.enabled ? `保留 ${archiveState.value.retention_days ?? '?'} 天` : '仅内存指标' },
@@ -584,9 +610,9 @@ async function saveSettings() {
         <aside class="live-card">
           <header class="live-head"><div><i class="live-dot" /><h2>实时请求</h2><span class="live-badge">LIVE</span></div><span>5s</span></header>
           <a-scrollbar class="live-feed" outer-class="live-feed-wrap">
-            <div v-for="row in feedRows" :key="row.request_id" class="feed-row" :class="{ 'feed-error': row.outcome !== 'ok' }">
+            <div v-for="row in feedRows" :key="row.request_id" class="feed-row" :class="{ 'feed-error': !requestSucceeded(row) }">
               <div class="feed-line1"><span class="feed-model"><i class="live-dot" /><span class="mono" :title="row.model || row.path">{{ row.model || row.path }}</span></span><small>{{ (Number(row.duration_ms || 0) / 1000).toFixed(1) }}s</small></div>
-              <div class="feed-line2"><time>{{ new Date(row.time).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</time><span :title="row.account">{{ row.account || '--' }}</span><small v-if="row.outcome === 'ok'">{{ compactTokens(row.total_tokens) }} tok</small><small v-else class="feed-outcome">{{ row.status || '' }} {{ outcomeName(row) }}</small></div>
+              <div class="feed-line2"><time>{{ new Date(row.time).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</time><span :title="row.account">{{ row.account || '--' }}</span><small v-if="requestSucceeded(row)">{{ compactTokens(row.total_tokens) }} tok</small><small v-else class="feed-outcome">{{ row.status || '' }} {{ outcomeName(row) }}</small></div>
             </div>
             <a-empty v-if="!feedRows.length" description="暂无请求" />
           </a-scrollbar>
@@ -666,12 +692,12 @@ async function saveSettings() {
           <a-select v-model="reqLimit" style="width: 120px" aria-label="读取条数" @change="load('requests')"><a-option :value="100">最近 100 条</a-option><a-option :value="300">最近 300 条</a-option><a-option :value="1000">最近 1000 条</a-option></a-select>
           <a-button class="csv-export" :disabled="!requestRows.length" @click="exportRequests">导出 CSV</a-button>
         </div>
-        <a-scrollbar class="table-scroll" outer-class="table-wrap"><table>
+        <a-scrollbar ref="reqScrollbar" class="table-scroll" outer-class="table-wrap"><table>
           <thead><tr><th>时间</th><th>结果</th><th>模型</th><th>账号</th><th>来源</th><th>耗时</th><th>Tokens</th><th>积分</th><th>请求 ID</th></tr></thead>
           <tbody>
-            <tr v-for="row in requestRows" :key="row.request_id">
+            <tr v-for="row in requestPageRows" :key="row.request_id">
               <td>{{ new Date(row.time).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) }}</td>
-              <td><span :class="['type-pill', row.outcome === 'ok' ? 'income' : 'expense']">{{ outcomeName(row) }}<template v-if="row.status"> · {{ row.status }}</template></span></td>
+              <td><span :class="['type-pill', requestSucceeded(row) ? 'income' : 'expense']">{{ outcomeName(row) }}<template v-if="row.status"> · {{ row.status }}</template></span></td>
               <td class="mono">{{ row.model || row.path }}</td>
               <td>{{ row.account || '--' }}<small v-if="row.path && row.model" class="benefit-detail">{{ row.path }}</small></td>
               <td class="mono">{{ row.client_ip || '--' }}<small v-if="row.user_agent" class="benefit-detail">{{ row.user_agent }}</small></td>
@@ -682,7 +708,14 @@ async function saveSettings() {
             </tr>
           </tbody>
         </table></a-scrollbar><a-empty v-if="!requestRows.length" description="暂无请求记录" />
-        <footer class="ledger-foot"><span>归档 {{ archiveState?.enabled ? '开启 · 保留 ' + (archiveState.retention_days ?? '?') + ' 天' : '关闭（仅内存指标）' }}</span><span>共 {{ requestRows.length }} 条</span></footer>
+        <footer class="ledger-foot requests-footer">
+          <span>归档 {{ archiveState?.enabled ? '开启 · 保留 ' + (archiveState.retention_days ?? '?') + ' 天' : '关闭（仅内存指标）' }}</span>
+          <div class="requests-pagination">
+            <span>共 {{ requestRows.length }} 条</span>
+            <a-select v-model="reqPageSize" size="small" class="requests-page-size" aria-label="每页条数"><a-option v-for="size in [10, 20, 50, 100]" :key="size" :value="size">{{ size }} 条/页</a-option></a-select>
+            <a-pagination v-model:current="reqPage" :page-size="reqPageSize" :total="requestRows.length" :buffer-size="1" size="small" aria-label="请求日志分页" />
+          </div>
+        </footer>
       </section>
     </template>
 
@@ -1071,6 +1104,13 @@ async function saveSettings() {
 .requests-card .request-id { display: table-cell; max-width: none; white-space: nowrap; overflow-wrap: normal; }
 .requests-card .request-id-text { display: inline-block; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .requests-card .request-id .arco-btn { vertical-align: middle; }
+.requests-footer { align-items: center; flex-wrap: wrap; }
+.requests-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-left: auto; }
+.requests-pagination > span { white-space: nowrap; }
+.requests-pagination :deep(.requests-page-size) { width: 104px; min-height: 28px; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .requests-pagination { width: 100%; gap: 8px; }
+}
 .models-card .schedule-chip { overflow-wrap: normal; }
 /* 模型 / 请求日志：整页收进可视高度，表格在卡片内滚动，页面本身不出滚动条 */
 .gateway-models-active, .gateway-requests-active { display: flex; flex-direction: column; height: calc(100dvh - 80px); min-height: 0; }
@@ -1080,4 +1120,9 @@ async function saveSettings() {
 .models-card .table-wrap, .requests-card .table-wrap { flex: 1; min-height: 120px; }
 .models-card .ledger-foot, .requests-card .ledger-foot { flex-shrink: 0; }
 .table-wrap > :deep(.arco-scrollbar-container) { height: 100%; overflow: auto; }
+@media (max-width: 820px) {
+  .gateway-requests-active { height: auto; margin-bottom: 24px; }
+  .requests-card .table-wrap { flex: none; height: 420px; }
+  .requests-card table { min-width: 1000px; }
+}
 </style>

@@ -6,6 +6,7 @@ import "errors"
 
 // ClientSession 仅 Windows 客户端支持。
 type ClientSession struct {
+	AccountUID  string
 	Cookie      string
 	DeviceID    string
 	WebID       string

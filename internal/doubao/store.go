@@ -357,7 +357,7 @@ func (s *Store) ImportClient(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	return s.Add(ctx, Account{Cookie: sess.Cookie, DeviceID: sess.DeviceID, WebID: sess.WebID, Fingerprint: sess.Fingerprint}, "")
+	return s.Add(ctx, Account{AccountUID: sess.AccountUID, Cookie: sess.Cookie, DeviceID: sess.DeviceID, WebID: sess.WebID, Fingerprint: sess.Fingerprint}, "")
 }
 
 func (s *Store) GatewayAccounts() []gateway.Account {

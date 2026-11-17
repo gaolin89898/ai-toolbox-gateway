@@ -99,6 +99,7 @@ func (h *Handler) providerChat(w http.ResponseWriter, r *http.Request, body []by
 	})
 	if err != nil {
 		st.status = gateway.Status(err)
+		code := gateway.Code(err)
 		st.outcome = reqlog.OutcomeHTTPError
 		if r.Context().Err() != nil {
 			st.outcome = reqlog.OutcomeInterrupted
@@ -106,12 +107,12 @@ func (h *Handler) providerChat(w http.ResponseWriter, r *http.Request, body []by
 		}
 		if started {
 			st.outcome = reqlog.OutcomeStreamError
-			raw, _ := json.Marshal(map[string]any{"error": map[string]any{"message": err.Error(), "type": "upstream_error", "code": "upstream_error"}})
+			raw, _ := json.Marshal(map[string]any{"error": map[string]any{"message": err.Error(), "type": "upstream_error", "code": code}})
 			fmt.Fprintf(w, "event: error\ndata: %s\n\n", raw)
 			_ = http.NewResponseController(w).Flush()
 			return
 		}
-		writeOpenAIError(w, st.status, "upstream_error", err.Error())
+		writeOpenAIError(w, st.status, code, err.Error())
 		return
 	}
 	st.status = 200

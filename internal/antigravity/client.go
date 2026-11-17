@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/googlehttp"
 )
 
 const BaseURL = "https://daily-cloudcode-pa.googleapis.com"
@@ -29,7 +32,7 @@ func NewClient() *Client {
 	if id == "" && secret == "" {
 		id, secret = defaultClientID, defaultClientSecret
 	}
-	return &Client{HTTP: &http.Client{Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, OAuthClientID: id, OAuthClientSecret: secret, Base: BaseURL, TokenURL: "https://oauth2.googleapis.com/token", UserInfoURL: "https://www.googleapis.com/oauth2/v2/userinfo"}
+	return &Client{HTTP: &http.Client{Transport: googlehttp.NewTransport(), Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, OAuthClientID: id, OAuthClientSecret: secret, Base: BaseURL, TokenURL: "https://oauth2.googleapis.com/token", UserInfoURL: "https://www.googleapis.com/oauth2/v2/userinfo"}
 }
 
 func (c *Client) request(ctx context.Context, method, endpoint, token string, body []byte, contentType string, result any) error {
@@ -44,6 +47,9 @@ func (c *Client) request(ctx context.Context, method, endpoint, token string, bo
 	req.Header.Set("User-Agent", UserAgent)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("Antigravity 请求超时，请检查后端的 Google 服务网络连接")
+		}
 		return fmt.Errorf("Antigravity 连接失败，请检查 Google 服务网络连接")
 	}
 	defer resp.Body.Close()

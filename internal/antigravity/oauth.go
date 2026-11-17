@@ -96,6 +96,11 @@ func (l *OAuthLogin) callback(w http.ResponseWriter, r *http.Request) {
 func (l *OAuthLogin) Close() { _ = l.server.Close() }
 
 func (l *OAuthLogin) Wait(ctx context.Context) (Account, error) {
+	return l.WaitWithProgress(ctx, nil)
+}
+
+// WaitWithProgress reports a valid callback before starting the token exchange.
+func (l *OAuthLogin) WaitWithProgress(ctx context.Context, onExchange func()) (Account, error) {
 	var cb oauthCallback
 	select {
 	case <-ctx.Done():
@@ -105,14 +110,19 @@ func (l *OAuthLogin) Wait(ctx context.Context) (Account, error) {
 	if cb.denied {
 		return Account{}, fmt.Errorf("Google 授权未完成，请重新登录并同意授权")
 	}
+	if onExchange != nil {
+		onExchange()
+	}
+	exchangeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	form := url.Values{"client_id": {l.client.OAuthClientID}, "client_secret": {l.client.OAuthClientSecret}, "grant_type": {"authorization_code"}, "code": {cb.code}, "code_verifier": {l.verifier}, "redirect_uri": {l.redirect}}
 	var reply struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		ExpiresIn    int    `json:"expires_in"`
 	}
-	if err := l.client.request(ctx, "POST", l.client.TokenURL, "", []byte(form.Encode()), "application/x-www-form-urlencoded", &reply); err != nil {
-		return Account{}, err
+	if err := l.client.request(exchangeCtx, "POST", l.client.TokenURL, "", []byte(form.Encode()), "application/x-www-form-urlencoded", &reply); err != nil {
+		return Account{}, fmt.Errorf("Google 授权令牌交换失败：%w", err)
 	}
 	if !validToken(reply.AccessToken) || !validToken(reply.RefreshToken) || reply.ExpiresIn <= 0 || reply.ExpiresIn > 31536000 {
 		return Account{}, fmt.Errorf("Antigravity 授权未返回有效令牌，请重新授权")

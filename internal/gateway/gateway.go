@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/linguo2625469/workbuddy2api-panel/internal/googlehttp"
 )
 
 type Account struct {
@@ -113,7 +115,7 @@ func (r *Router) Availability() map[string]map[string]int {
 }
 
 func New(sources map[string]Source) *Router {
-	return &Router{Sources: sources, HTTP: &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Bases: map[string]string{
+	return &Router{Sources: sources, HTTP: &http.Client{Transport: googlehttp.NewTransport(), Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, Bases: map[string]string{
 		"minimax": "https://agent.minimax.cn/mavis/api/v1/llm/v1", "qoder": "https://gateway.qoder.com.cn", "trae": "https://trae-api-cn.mchost.guru", "antigravity": "https://daily-cloudcode-pa.googleapis.com", "doubao": "https://www.doubao.com",
 	}, MaxInFlight: 2, Cooldown: time.Minute, cache: map[string]catalog{}, flights: map[string]chan struct{}{}, states: map[string]*accountState{}, sticky: map[string]binding{}, signatures: map[string]string{}}
 }
@@ -130,7 +132,10 @@ func Split(model string) (provider, bare string, ok bool) {
 type Error struct {
 	Status   int
 	Message  string
+	Code     string
 	Rejected bool
+	// Model output formatting errors do not indicate an unhealthy account.
+	NoCooldown bool
 }
 
 func (e *Error) Error() string                 { return e.Message }
@@ -146,6 +151,14 @@ func Status(err error) int {
 		}
 	}
 	return http.StatusBadGateway
+}
+
+func Code(err error) string {
+	var e *Error
+	if errors.As(err, &e) && e.Code != "" {
+		return e.Code
+	}
+	return "upstream_error"
 }
 func id() string {
 	var b [16]byte
@@ -435,7 +448,12 @@ func (r *Router) Chat(ctx context.Context, body []byte, session string, emit Emi
 		if err != nil {
 			attempt.Status = Status(err)
 		}
-		r.release(p, session, a, attempt.Status, err == nil)
+		releaseStatus := attempt.Status
+		var accountError *Error
+		if errors.As(err, &accountError) && accountError.NoCooldown {
+			releaseStatus = 0
+		}
+		r.release(p, session, a, releaseStatus, err == nil)
 		if observe != nil {
 			observe(attempt)
 		}

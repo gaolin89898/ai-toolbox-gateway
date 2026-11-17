@@ -47,3 +47,14 @@ func TestWorkPayloadShape(t *testing.T) {
 		t.Fatalf("bot id mismatch")
 	}
 }
+
+func TestKimiWorkMemoryProfile(t *testing.T) {
+	for _, key := range []string{"person-kimi-k3-1-pro-261111", "person-kimi-k3-1-pro-highspeed-261111", "person-kimi-k3-261111"} {
+		payload := WorkPayload("hello", key, 3, "device")
+		config := payload["option"].(map[string]any)["model_config"].(map[string]any)
+		extra := config["model_extra_params"].(map[string]any)
+		if extra["memory_profile"] != "300k_230" || extra["total_window_size"] != "300000" {
+			t.Fatalf("%s memory configuration does not match the official catalog", key)
+		}
+	}
+}

@@ -119,8 +119,9 @@ export function useAccounts() {
   const antigravityDraft = reactive(emptyAntigravityDraft());
   const emptyDoubaoDraft = () => ({ uid: '', nickname: '', cookie: '' });
   const doubaoDraft = reactive(emptyDoubaoDraft());
-  const webLogins = reactive({ antigravity: { state: '', url: '', status: '', error: '', waiting: false }, doubao: { state: '', url: '', status: '', error: '', waiting: false } });
-  const webLoginAttempts = { antigravity: 0, doubao: 0 }, webLoginTimers = {}, webLoginBrowsers = {};
+  const emptyWebLogin = () => ({ state: '', url: '', phase: 'waiting', status: '', error: '', waiting: false, polling: false, failures: 0, expiresAt: 0 });
+  const webLogins = reactive({ antigravity: emptyWebLogin(), doubao: emptyWebLogin() });
+  const webLoginAttempts = { antigravity: 0, doubao: 0 }, webLoginTimers = {}, webLoginBrowsers = {}, webLoginRequests = {};
   let minimaxTimer, minimaxAttempt = 0;
   let qoderTimer, qoderAttempt = 0;
   const login = reactive({ state: '', url: '', status: '', error: '', waiting: false });
@@ -194,8 +195,8 @@ export function useAccounts() {
     const apiBase = hostRuntime.apiBase || new URL(import.meta.env.BASE_URL + 'api/', document.baseURI);
     const response = await hostRuntime.fetchAPI(new URL(path, apiBase), { signal: abort.signal, ...options, headers });
     const data = await response.json().catch(() => ({}));
-    if (response.status === 401) throw new Error('无法自动连接账号服务，请在运行服务的电脑上打开页面后重试');
-    if (!response.ok) throw new Error(data.error || `请求失败：HTTP ${response.status}`);
+    if (response.status === 401) throw Object.assign(new Error('无法自动连接账号服务，请在运行服务的电脑上打开页面后重试'), { status: response.status });
+    if (!response.ok) throw Object.assign(new Error(data.error || `请求失败：HTTP ${response.status}`), { status: response.status });
     return data;
   }
   async function action(name, callback, { quiet = false } = {}) {
@@ -323,10 +324,12 @@ export function useAccounts() {
   function stopWebLogin(selected) {
     ++webLoginAttempts[selected];
     clearTimeout(webLoginTimers[selected]);
+    webLoginRequests[selected]?.abort();
+    delete webLoginRequests[selected];
     webLoginBrowsers[selected]?.close();
     delete webLoginBrowsers[selected];
     const state = webLogins[selected].state;
-    Object.assign(webLogins[selected], { state: '', url: '', status: '', error: '', waiting: false });
+    Object.assign(webLogins[selected], emptyWebLogin());
     if (state) api(selected + '/login/cancel?state=' + encodeURIComponent(state), { method: 'POST', keepalive: true, signal: undefined }).catch(() => {});
   }
   async function startWebLogin(selected) {
@@ -353,7 +356,7 @@ export function useAccounts() {
           url = target.href;
           browser.open(url);
         }
-        Object.assign(webLogins[selected], { state, url, waiting: true, status: selected === 'antigravity' ? '等待 Google 网页授权' : '请在新窗口完成豆包登录' });
+        Object.assign(webLogins[selected], { state, url, waiting: true, expiresAt: Date.parse(data.expires_at) || Date.now() + 15 * 60_000, status: selected === 'antigravity' ? '等待 Google 网页授权' : '请在新窗口完成豆包登录' });
         webLoginTimers[selected] = setTimeout(() => pollWebLogin(selected, attempt), 1500);
       } catch (cause) {
         browser?.close();
@@ -365,26 +368,64 @@ export function useAccounts() {
   }
   async function pollWebLogin(selected, attempt) {
     const current = webLogins[selected];
-    if (attempt !== webLoginAttempts[selected] || !current.state || !addVisible.value) return;
-    try {
-      const result = await api(selected + '/login/poll?state=' + encodeURIComponent(current.state));
-      if (attempt !== webLoginAttempts[selected] || !addVisible.value) return;
-      if (result.done) {
-        if (result.status !== 'success') throw new Error(result.error || '授权未完成，请重试');
-        closeAdd(); selectProvider(selected); Message.success((selected === 'doubao' ? '豆包' : 'Antigravity') + '授权成功，账号已保存');
-        await refreshOverview(); await refreshLogs();
-      } else {
-        if (result.status === 'saving') current.status = '已完成登录，正在验证并保存账号…';
-        webLoginTimers[selected] = setTimeout(() => pollWebLogin(selected, attempt), 1500);
-      }
-    } catch (cause) {
-      if (attempt === webLoginAttempts[selected]) {
-        const state = current.state;
-        webLoginBrowsers[selected]?.close();
-        Object.assign(current, { waiting: false, error: cause.message });
-        if (state) api(selected + '/login/cancel?state=' + encodeURIComponent(state), { method: 'POST' }).catch(() => {});
-      }
+    if (attempt !== webLoginAttempts[selected] || !current.state || !current.waiting || current.polling || !addVisible.value) return;
+    if (Date.now() >= current.expiresAt) {
+      Object.assign(current, { waiting: false, error: '授权已超时，请重新开始' });
+      return;
     }
+    current.polling = true;
+    const controller = new AbortController();
+    webLoginRequests[selected] = controller;
+    let timer, result;
+    try {
+      // Bound the promise too: a host fetch bridge may not forward aborts.
+      result = await Promise.race([
+        api(selected + '/login/poll?state=' + encodeURIComponent(current.state), { cache: 'no-store', signal: controller.signal }),
+        new Promise((_, reject) => { timer = setTimeout(() => { reject(new Error('查询授权状态超时')); controller.abort(); }, 10_000); }),
+      ]);
+      if (result.state !== current.state || typeof result.done !== 'boolean'
+        || !(result.done ? ['success', 'error', 'cancelled'] : ['waiting', 'exchanging', 'saving']).includes(result.status)) throw new Error('账号服务返回了无效的授权状态');
+    } catch (cause) {
+      if (attempt === webLoginAttempts[selected] && addVisible.value) {
+        current.error = cause.message;
+        if ([401, 403, 404].includes(cause.status)) current.waiting = false;
+        else {
+          current.status = '暂时无法获取授权状态';
+          // A failed status read must not cancel the OAuth exchange or save.
+          if (++current.failures < 3) webLoginTimers[selected] = setTimeout(() => pollWebLogin(selected, attempt), 2000);
+        }
+      }
+      return;
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+      if (webLoginRequests[selected] === controller) delete webLoginRequests[selected];
+      if (attempt === webLoginAttempts[selected]) current.polling = false;
+    }
+    if (attempt !== webLoginAttempts[selected] || !addVisible.value) return;
+    current.error = '';
+    current.failures = 0;
+    current.phase = result.status;
+    if (result.done) {
+      if (result.status !== 'success') {
+        Object.assign(current, { waiting: false, url: '', error: result.error || '授权未完成，请重试' });
+        return;
+      }
+      current.state = '';
+      closeAdd(); selectProvider(selected); Message.success((selected === 'doubao' ? '豆包' : 'Antigravity') + '授权成功，账号已保存');
+      await Promise.allSettled([refreshOverview(), refreshLogs()]);
+    } else {
+      if (result.status === 'exchanging') current.status = '已收到 Google 授权，正在交换令牌…';
+      else if (result.status === 'saving') current.status = '已完成登录，正在验证并保存账号…';
+      else current.status = selected === 'antigravity' ? '等待 Google 网页授权' : '请在新窗口完成豆包登录';
+      webLoginTimers[selected] = setTimeout(() => pollWebLogin(selected, attempt), 1500);
+    }
+  }
+  function retryWebLogin(selected) {
+    if (!webLogins[selected].waiting || webLogins[selected].polling) return;
+    clearTimeout(webLoginTimers[selected]);
+    Object.assign(webLogins[selected], { failures: 0, status: '正在查询授权状态…' });
+    return pollWebLogin(selected, webLoginAttempts[selected]);
   }
   function stopTraeLogin() {
     ++traeLoginAttempt;
@@ -707,7 +748,7 @@ export function useAccounts() {
     qoderAccounts, qoderLogin, qoderDraft, startQoderLogin, stopQoderLogin, addQoder, updateQoder, effectiveHours,
     minimaxAccounts, minimaxDraft, addMiniMax, updateMiniMax, minimaxLogin, startMiniMaxLogin, stopMiniMaxLogin,
     doubaoAccounts, doubaoDraft, addDoubao, updateDoubao, importDoubaoClient,
-    webLogins, startWebLogin, stopWebLogin,
+    webLogins, startWebLogin, stopWebLogin, retryWebLogin,
     antigravityAccounts, antigravityDraft, addAntigravity, importAntigravity, updateAntigravity,
     traeLogin, checkTraeLoginAvailable, startTraeLogin, stopTraeLogin,
     remarks, accountName, eligible, signed, pending, credits, totalCredits, unknownBalances, todayLogs,

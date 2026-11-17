@@ -15,6 +15,8 @@ const (
 	WorkPCVersion      = "2.36.11"
 	WorkRuntimeVersion = "3.45.3"
 	WorkVersionCode    = "20800"
+	// The Work endpoint limits its single text input separately from model tokens.
+	WorkMaxInputCharacters = 262144
 )
 
 // WorkModel 是豆包工作模型目录的一个条目：ID 即官方 model_item_key。
@@ -34,9 +36,9 @@ var allEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 var WorkCatalog = []WorkModel{
 	{ID: "person-deepseek-v4-1-flash-261017", Name: "DeepSeek V4.1 Flash", ContextWindow: 300000, MemoryProfile: "300k_230", Efforts: allEfforts, DefaultEffort: "max"},
 	{ID: "seed-lite-7b", Name: "豆包 2.1 Lite", ContextWindow: 256000, MemoryProfile: "256k", Efforts: []string{"low", "medium", "high"}, DefaultEffort: "high"},
-	{ID: "person-kimi-k3-1-pro-261111", Name: "Kimi K3.1 Pro", ContextWindow: 300000, MemoryProfile: "300k", Efforts: allEfforts, DefaultEffort: "high"},
-	{ID: "person-kimi-k3-1-pro-highspeed-261111", Name: "Kimi K3.1 Pro 高速", ContextWindow: 300000, MemoryProfile: "300k", Efforts: allEfforts, DefaultEffort: "high"},
-	{ID: "person-kimi-k3-261111", Name: "Kimi K3", ContextWindow: 300000, MemoryProfile: "300k", Efforts: allEfforts, DefaultEffort: "high"},
+	{ID: "person-kimi-k3-1-pro-261111", Name: "Kimi K3.1 Pro", ContextWindow: 300000, MemoryProfile: "300k_230", Efforts: allEfforts, DefaultEffort: "high"},
+	{ID: "person-kimi-k3-1-pro-highspeed-261111", Name: "Kimi K3.1 Pro 高速", ContextWindow: 300000, MemoryProfile: "300k_230", Efforts: allEfforts, DefaultEffort: "high"},
+	{ID: "person-kimi-k3-261111", Name: "Kimi K3", ContextWindow: 300000, MemoryProfile: "300k_230", Efforts: allEfforts, DefaultEffort: "high"},
 	{ID: "person-glm-5-3-261111", Name: "GLM 5.3", ContextWindow: 300000, MemoryProfile: "300k", Efforts: allEfforts, DefaultEffort: "high"},
 	{ID: "person-glm-5-3-flash-261111", Name: "GLM 5.3 Flash", ContextWindow: 300000, MemoryProfile: "300k", Efforts: allEfforts, DefaultEffort: "high"},
 	{ID: "person-deepseek-v4-pro-ga-260813", Name: "DeepSeek V4 Pro", ContextWindow: 300000, MemoryProfile: "300k", Efforts: allEfforts, DefaultEffort: "high"},
@@ -143,7 +145,7 @@ func WorkPayload(prompt, modelKey string, effort int, deviceID string) map[strin
 			"content_block": []any{map[string]any{
 				"block_type": 10000,
 				"content": map[string]any{
-					"text_block":    map[string]any{"text": prompt, "icon_url": "", "icon_url_dark": "", "summary": ""},
+					"text_block":     map[string]any{"text": prompt, "icon_url": "", "icon_url_dark": "", "summary": ""},
 					"pc_event_block": "",
 				},
 				"block_id": newID(), "parent_id": "", "meta_info": []any{}, "extra_info": map[string]any{}, "append_fields": []any{},
@@ -164,7 +166,7 @@ func WorkPayload(prompt, modelKey string, effort int, deviceID string) map[strin
 			},
 			"regen_query_id": []any{}, "edit_query_id": []any{}, "regen_instruction": "",
 			"no_replace_for_regen": false, "message_from": 0, "shared_app_name": "", "shared_app_id": "",
-			"sse_recv_event_options": map[string]any{"support_chunk_delta": true},
+			"sse_recv_event_options":    map[string]any{"support_chunk_delta": true},
 			"support_lazy_fetch_stream": true, "is_ai_playground": false, "is_old_user": true,
 			"general_task_param": generalTask,
 			"recovery_option": map[string]any{

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	doubao "github.com/linguo2625469/workbuddy2api-panel/internal/doubaowork"
 )
@@ -18,7 +19,7 @@ import (
 func doubaoWorkModels() []Model {
 	out := []Model{}
 	for _, m := range doubao.WorkCatalog {
-		f := map[string]any{"name": m.Name, "catalog_source": "work_builtin"}
+		f := map[string]any{"name": m.Name, "catalog_source": "work_builtin", "supports_tool_call": true, "tool_call_mode": "text_bridge", "supports_images": false, "max_input_characters": doubao.WorkMaxInputCharacters}
 		if m.ContextWindow > 0 {
 			f["context_length"] = m.ContextWindow
 		}
@@ -34,41 +35,17 @@ func doubaoWorkModels() []Model {
 
 // doubaoChat 走豆包工作 /chat/completion 协议（客户端会话，model_item_key 选模型）。
 func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request map[string]any, emit Emit) error {
-	for _, key := range []string{"tools", "functions", "tool_choice", "function_call", "response_format"} {
-		if v := request[key]; v != nil {
-			return failure(400, "doubao: tools and structured output are not supported")
-		}
+	bridge, err := newDoubaoTools(request)
+	if err != nil {
+		return err
 	}
-	texts := []string{}
-	for _, v := range arr(request["messages"]) {
-		message := obj(v)
-		role := str(message["role"])
-		switch role {
-		case "system", "developer", "user", "assistant":
-		default:
-			return failure(400, "doubao: unsupported message role")
-		}
-		if len(arr(message["tool_calls"])) > 0 || message["function_call"] != nil {
-			return failure(400, "doubao: tool messages are not supported")
-		}
-		text, ok := message["content"].(string)
-		if !ok {
-			parts, valid := message["content"].([]any)
-			if !valid {
-				return failure(400, "doubao: message content must be text")
-			}
-			for _, p := range parts {
-				part := obj(p)
-				value, valid := part["text"].(string)
-				if str(part["type"]) != "text" || !valid {
-					return failure(400, "doubao: only text content is supported")
-				}
-				text += value
-			}
-		}
-		texts = append(texts, role+": "+text)
+	prompt, err := bridge.prompt(arr(request["messages"]))
+	if err != nil {
+		return err
 	}
-	prompt := strings.Join(texts, string(rune(10))+string(rune(10)))
+	if characters := utf8.RuneCountInString(prompt); characters > doubao.WorkMaxInputCharacters {
+		return &Error{Status: 400, Code: "context_length_exceeded", Message: "doubao: maximum context length for a Work text input is " + strconv.Itoa(doubao.WorkMaxInputCharacters) + " characters; this request has " + strconv.Itoa(characters) + ". Compact the conversation before retrying."}
+	}
 	effort := doubao.WorkEffort(m.ID, str(request["reasoning_effort"]))
 	payload := doubao.WorkPayload(prompt, m.ID, effort, c.DeviceID)
 	raw, err := json.Marshal(payload)
@@ -102,8 +79,9 @@ func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request 
 		return emit(map[string]any{"id": completionID, "object": "chat.completion.chunk", "created": created, "model": m.ID,
 			"choices": []any{map[string]any{"index": 0, "delta": delta, "finish_reason": finish}}})
 	}
-	previous := map[string]string{}
-	reasoningIDs := map[string]bool{}
+	parser := newDoubaoTextParser()
+	var answer strings.Builder
+	ended := false
 	event, data := "", []string{}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64<<10), 4<<20)
@@ -123,6 +101,7 @@ func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request 
 		rawFrame := strings.Join(data, string(rune(10)))
 		data = nil
 		if rawFrame == "[DONE]" {
+			ended = true
 			break
 		}
 		var frame map[string]any
@@ -130,38 +109,20 @@ func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request 
 			continue
 		}
 		if code := num(frame["error_code"]); code != 0 {
+			if code == 710020202 {
+				return failure(400, "doubao: upstream rejected request parameters (710020202)")
+			}
+			if code == -1 && str(frame["error_msg"]) == "delegated input protocol violation" {
+				return failure(502, "doubao: upstream rejected the conversation format (delegated input protocol violation)")
+			}
 			return failure(502, "doubao: upstream error "+strconv.Itoa(int(code)))
 		}
-		blocks := []map[string]any{}
-		collectWorkBlocks(frame, 0, false, 0, &blocks)
-		appendMode := event == "STREAM_CHUNK" || event == "CHUNK_DELTA"
-		for _, block := range blocks {
-			blockType := int(num(block["block_type"]))
-			blockID := str(block["block_id"])
-			if blockType == 10040 && blockID != "" {
-				reasoningIDs[blockID] = true
-			}
-			tb := obj(obj(block["content"])["text_block"])
-			text := str(tb["text"])
-			if text == "" {
-				continue
-			}
-			key := blockID
-			if key == "" {
-				key = "b" + strconv.Itoa(blockType)
-			}
-			before := previous[key]
-			var delta string
-			if appendMode {
-				previous[key] = before + text
-				delta = text
-			} else if strings.HasPrefix(text, before) {
-				previous[key] = text
-				delta = text[len(before):]
-			} else {
-				previous[key] = text
-				delta = text
-			}
+		fragments, err := parser.feed(event, frame)
+		if err != nil {
+			return err
+		}
+		for _, fragment := range fragments {
+			field, delta := fragment.field, fragment.text
 			if delta == "" {
 				continue
 			}
@@ -171,9 +132,12 @@ func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request 
 				}
 				started = true
 			}
-			field := "content"
-			if blockType == 10040 || reasoningIDs[key] || strings.Contains(strings.ToLower(str(tb["icon_url"])), "deep_think") {
-				field = "reasoning_content"
+			if bridge.active() && field == "content" {
+				if answer.Len()+len(delta) > 8<<20 {
+					return failure(502, "doubao: tool response exceeds the size limit")
+				}
+				answer.WriteString(delta)
+				continue
 			}
 			if err := chunk(map[string]any{field: delta}, nil); err != nil {
 				return err
@@ -181,6 +145,7 @@ func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request 
 		}
 		if event == "SSE_REPLY_END" {
 			if int(num(frame["end_type"])) == 3 {
+				ended = true
 				break
 			}
 			event = ""
@@ -188,50 +153,39 @@ func (r *Router) doubaoChat(ctx context.Context, c Credential, m Model, request 
 		}
 		event = ""
 	}
+	if err := scanner.Err(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return failure(502, "doubao: upstream stream interrupted")
+	}
 	if !started {
 		return failure(502, "doubao: upstream returned no text")
 	}
+	if bridge.active() {
+		if !ended {
+			return failure(502, "doubao: upstream closed before completing the tool response")
+		}
+		if answer.Len() == 0 {
+			return failure(502, "doubao: upstream returned no answer for the tool request")
+		}
+		content, calls, err := bridge.response(answer.String())
+		if err != nil {
+			return err
+		}
+		if content != "" {
+			if err := chunk(map[string]any{"content": content}, nil); err != nil {
+				return err
+			}
+		}
+		if len(calls) > 0 {
+			if err := chunk(map[string]any{"tool_calls": calls}, nil); err != nil {
+				return err
+			}
+			return chunk(map[string]any{}, "tool_calls")
+		}
+	}
 	return chunk(map[string]any{}, "stop")
-}
-
-// collectWorkBlocks 递归收集带 block_type 与 content 的块对象。
-// user_type=1 的子树是用户消息回显（FULL_MSG_NOTIFY），整棵跳过。
-func collectWorkBlocks(v any, userType int, hasContext bool, depth int, out *[]map[string]any) {
-	if depth > 10 || v == nil {
-		return
-	}
-	switch t := v.(type) {
-	case []any:
-		for _, c := range t {
-			collectWorkBlocks(c, userType, hasContext, depth+1, out)
-		}
-	case map[string]any:
-		if raw, ok := t["user_type"]; ok {
-			userType = int(num(raw))
-			hasContext = true
-		}
-		if hasContext && userType == 1 {
-			return
-		}
-		if t["block_type"] != nil && t["content"] != nil {
-			*out = append(*out, t)
-		}
-		for _, c := range t {
-			collectWorkBlocks(c, userType, hasContext, depth+1, out)
-		}
-	}
-}
-
-// commonSuffixAppend 在上游改写快照时取新增尾部，避免重复输出。
-func commonSuffixAppend(before, now string) string {
-	n := 0
-	for n < len(before) && n < len(now) && before[n] == now[n] {
-		n++
-	}
-	if n >= len(now) {
-		return ""
-	}
-	return now[n:]
 }
 
 // doubaoWorkHeaders 构造豆包工作请求头（与客户端一致）。

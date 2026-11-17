@@ -56,6 +56,14 @@ func TestAccountLifecycleIdentityAndCredentialIsolation(t *testing.T) {
 	if _, err = s.Add(ctx, Account{Cookie: "other-private-session"}, a.UID); err == nil {
 		t.Fatal("allowed replacing account identity")
 	}
+	// A client profile's expected UID must match the authenticated Cookie even
+	// when importing without a pre-existing panel account selection.
+	if _, err = s.Add(ctx, Account{AccountUID: a.AccountUID, Cookie: "other-private-session", DeviceID: "client-device"}, ""); err == nil {
+		t.Fatal("accepted client cookies belonging to another account")
+	}
+	if len(s.List()) != 1 {
+		t.Fatal("mismatched client import added an account")
+	}
 	if _, err = s.Action(ctx, a.UID, "revive"); err != nil {
 		t.Fatal(err)
 	}

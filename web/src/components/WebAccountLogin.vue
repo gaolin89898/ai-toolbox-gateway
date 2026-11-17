@@ -13,8 +13,9 @@ const quiet = promise => promise?.catch(() => {});
     <a-alert v-if="model.webLogins[provider].error" type="error" class="login-error">{{ model.webLogins[provider].error }}</a-alert>
     <a-button v-if="!model.webLogins[provider].waiting" type="primary" long size="large" :loading="model.busy.has(provider + '-login')" @click="quiet(model.startWebLogin(provider))"><template #icon><icon-export /></template>{{ model.webLogins[provider].error ? '重新开始网页授权' : '开始网页授权' }}</a-button>
     <div v-else class="authorization">
-      <a v-if="model.webLogins[provider].url" class="authorization-link" :href="model.webLogins[provider].url" target="_blank" rel="noopener noreferrer"><icon-export />打开 Google 授权页面</a>
+      <a v-if="model.webLogins[provider].url && model.webLogins[provider].phase === 'waiting'" class="authorization-link" :href="model.webLogins[provider].url" target="_blank" rel="noopener noreferrer"><icon-export />打开 Google 授权页面</a>
       <div class="inline-between"><span><i class="status-dot" />{{ model.webLogins[provider].status }}</span><a-button type="text" @click="model.stopWebLogin(provider)">取消本次授权</a-button></div>
+      <a-button v-if="model.webLogins[provider].error" type="outline" long :loading="model.webLogins[provider].polling" @click="quiet(model.retryWebLogin(provider))">重新查询</a-button>
     </div>
     <a-button v-if="provider === 'doubao'" type="outline" long :loading="model.busy.has('doubao-client-import')" @click="quiet(model.importDoubaoClient())">从豆包客户端导入登录态（用于工作模型转发）</a-button>
     <p class="dialog-login-status">{{ provider === 'antigravity' ? '使用 Google 账号登录并同意授权，无需填写 OAuth 凭证。' : '在打开的豆包网页中完成登录，无需复制 Cookie 或 Token。' }}</p>
