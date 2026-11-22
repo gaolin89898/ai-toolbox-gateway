@@ -51,15 +51,23 @@ func TestRetiredSupplierCompatibility(t *testing.T) {
 	if got, err := NormalizeSupplier(" Loomy "); err != nil || got != "auto" {
 		t.Fatalf("legacy supplier failed migration: %q %v", got, err)
 	}
+	if got, err := NormalizeSupplier(" Doubao "); err != nil || got != "auto" {
+		t.Fatalf("legacy doubao supplier failed migration: %q %v", got, err)
+	}
 	if _, _, ok := Split("loomy/chat"); ok {
 		t.Fatal("retired provider still routes")
 	}
+	if _, _, ok := Split("doubao/chat"); ok {
+		t.Fatal("retired doubao provider still routes")
+	}
 	for _, supplier := range append([]string{"auto"}, SupplierPriority...) {
-		if supplier == "loomy" {
+		if supplier == "loomy" || supplier == "doubao" {
 			t.Fatal("retired provider still in catalog priority")
 		}
-		if model, err := ResolveSupplierModel(supplier, "loomy/chat"); err == nil || model != "" {
-			t.Fatalf("retired model accepted by %s: %q %v", supplier, model, err)
+		for _, retired := range []string{"loomy/chat", "doubao/chat"} {
+			if model, err := ResolveSupplierModel(supplier, retired); err == nil || model != "" {
+				t.Fatalf("retired model accepted by %s: %q %v", supplier, model, err)
+			}
 		}
 	}
 }

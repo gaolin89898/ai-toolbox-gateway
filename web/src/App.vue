@@ -39,7 +39,8 @@ async function switchClient() {
   if (!switchAccount.value || model.desktopBusy) return;
   try { await model.switchDesktop(switchAccount.value); switchAccount.value = null; } catch { /* Preserve the confirmation for retry. */ }
 }
-const tabs = computed(() => [...[{ id: 'accounts', name: '账号', icon: IconUserGroup }, { id: 'tasks', name: '任务', icon: IconCheckSquare }, { id: 'billing', name: '明细', icon: IconBook }, { id: 'rewards', name: '奖励', icon: IconGift }, { id: 'settings', name: '签到', icon: IconCalendar }, { id: 'schedules', name: '定时', icon: IconCalendarClock }, { id: 'logs', name: '日志', icon: IconFile }], ...(model.capabilities?.gateway ? [{ id: 'gateway', name: '网关', icon: IconThunderbolt }] : [])]);
+const tabs = computed(() => [...[{ id: 'accounts', name: '账号', icon: IconUserGroup }, { id: 'tasks', name: '任务', icon: IconCheckSquare }, { id: 'billing', name: '明细', icon: IconBook }, { id: 'rewards', name: '奖励', icon: IconGift }, { id: 'settings', name: '签到', icon: IconCalendar }, { id: 'schedules', name: '定时', icon: IconCalendarClock }, { id: 'logs', name: '日志', icon: IconFile }].filter(tab => !(model.provider === 'doubao' && tab.id === 'tasks')), ...(model.capabilities?.gateway ? [{ id: 'gateway', name: '网关', icon: IconThunderbolt }] : [])]);
+const benefitPlatforms = computed(() => view.value === 'tasks' ? ['workbuddy-cn'] : ['workbuddy-cn', 'qoder']);
 function navigate(value) { view.value = value; location.hash = value; }
 watch(view, () => workspaceScrollbar.value?.scrollTo({ top: 0 }), { flush: 'post' });
 function hashChanged() { view.value = readView(); }
@@ -51,7 +52,10 @@ watch(dark, value => {
   if (!hostTheme.value) localStorage.setItem('wb.accounts.theme', value ? 'dark' : 'light');
 }, { immediate: true, flush: 'sync' });
 onBeforeUnmount(followHostTheme(value => { hostTheme.value = true; dark.value = value; }));
-watch(view, value => { document.title = `${{ accounts: '账号管理', tasks: '任务中心', billing: '积分明细', rewards: '活动奖励', settings: '签到设置', schedules: '定时任务', logs: '运行日志', gateway: '网关' }[value]} · AI 工具箱`; }, { immediate: true });
+watch(view, value => {
+  if (['tasks', 'rewards'].includes(value) && !benefitPlatforms.value.includes(model.platformSelection)) model.selectProvider('workbuddy-cn');
+  document.title = `${{ accounts: '账号管理', tasks: '任务中心', billing: '积分明细', rewards: '活动奖励', settings: '签到设置', schedules: '定时任务', logs: '运行日志', gateway: '网关' }[value]} · AI 工具箱`;
+}, { immediate: true });
 async function openKey() {
   keyVisible.value = true;
   keyLoading.value = true;
@@ -82,7 +86,7 @@ async function remove() {
         <SchedulesView v-else-if="view === 'schedules'" :model="model" :embedded="embedded" @navigate="navigate" @key="openKey" />
         <BillingView v-else-if="view === 'billing'" :model="model"><template #platform-switcher><PlatformSelect :model="model" /></template></BillingView>
         <GatewayView v-else-if="view === 'gateway' && model.capabilities?.gateway" :model="model" />
-        <BenefitsView v-else-if="['tasks', 'rewards'].includes(view)" :model="model" :section="view"><template #platform-switcher><PlatformSelect :model="model" /></template></BenefitsView>
+        <BenefitsView v-else-if="['tasks', 'rewards'].includes(view)" :model="model" :section="view"><template #platform-switcher><PlatformSelect :model="model" :only="benefitPlatforms" /></template></BenefitsView>
         <LogsView v-else :model="model" />
       </main>
     </a-scrollbar>

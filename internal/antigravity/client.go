@@ -142,6 +142,67 @@ func (c *Client) Inspect(ctx context.Context, a *Account) error {
 	return nil
 }
 
+// QuotaBucket is one allowance window (weekly or five-hour) inside a model group.
+type QuotaBucket struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Window    string    `json:"window"`
+	Remaining float64   `json:"remaining"`
+	ResetAt   time.Time `json:"reset_at,omitempty"`
+}
+
+// QuotaGroup is a model family that shares weekly and five-hour limits.
+type QuotaGroup struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Buckets     []QuotaBucket `json:"buckets"`
+}
+
+// Quotas reads the weekly and five-hour allowance summary from Code Assist.
+func (c *Client) Quotas(ctx context.Context, a *Account) ([]QuotaGroup, error) {
+	if a.ProjectID == "" {
+		return nil, fmt.Errorf("Antigravity 账号缺少项目 ID，无法查询额度")
+	}
+	if err := c.Refresh(ctx, a); err != nil {
+		return nil, err
+	}
+	body := []byte("{\"project\":\"" + a.ProjectID + "\"}")
+	var reply struct {
+		Groups []struct {
+			DisplayName string `json:"displayName"`
+			Description string `json:"description"`
+			Buckets     []struct {
+				BucketID          string   `json:"bucketId"`
+				DisplayName       string   `json:"displayName"`
+				Window            string   `json:"window"`
+				ResetTime         string   `json:"resetTime"`
+				RemainingFraction *float64 `json:"remainingFraction"`
+			} `json:"buckets"`
+		} `json:"groups"`
+	}
+	if err := c.request(ctx, "POST", c.Base+"/v1internal:retrieveUserQuotaSummary", a.AccessToken, body, "application/json", &reply); err != nil {
+		return nil, err
+	}
+	out := []QuotaGroup{}
+	for _, g := range reply.Groups {
+		group := QuotaGroup{Name: g.DisplayName, Description: g.Description}
+		for _, b := range g.Buckets {
+			if b.RemainingFraction == nil {
+				continue
+			}
+			reset, _ := time.Parse(time.RFC3339, b.ResetTime)
+			group.Buckets = append(group.Buckets, QuotaBucket{ID: b.BucketID, Name: b.DisplayName, Window: b.Window, Remaining: *b.RemainingFraction, ResetAt: reset})
+		}
+		if len(group.Buckets) > 0 {
+			out = append(out, group)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("Antigravity 额度响应未包含可识别的模型配额")
+	}
+	return out, nil
+}
+
 func validToken(v string) bool {
 	return v != "" && len(v) <= 32768 && !strings.ContainsAny(v, "\r\n\x00") && strings.TrimSpace(v) == v
 }

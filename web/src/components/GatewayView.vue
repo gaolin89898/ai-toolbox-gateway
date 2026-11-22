@@ -8,7 +8,6 @@ import traeIcon from '../assets/platform-trae.png';
 import qoderIcon from '../assets/platform-qoder.png';
 import minimaxIcon from '../assets/platform-minimax.png';
 import antigravityIcon from '../assets/platform-antigravity.svg';
-import doubaoIcon from '../assets/platform-doubao.png';
 
 // GatewayView 网关（设计稿 GATEWAY · 用量/模型/请求日志/网关设置 四页合一）：
 // 页头 Segments 切换 + Gateway Status 卡 + 带坐标轴的用量图表 + Live Requests 流；
@@ -34,7 +33,6 @@ const suppliers = [
   { id: 'qoder', name: 'Qoder', icon: qoderIcon },
   { id: 'minimax', name: 'MiniMax', icon: minimaxIcon },
   { id: 'antigravity', name: 'Antigravity', icon: antigravityIcon },
-  { id: 'doubao', name: '豆包', icon: doubaoIcon },
 ];
 const supplierById = Object.fromEntries(suppliers.map(item => [item.id, item]));
 let modelLoadVersion = 0;
@@ -659,7 +657,7 @@ async function saveSettings() {
       <section class="panel-card models-card">
         <div class="benefit-toolbar">
           <a-input v-model="modelSearch" allow-clear placeholder="搜索模型 ID / 名称 / 描述 / 厂商" aria-label="搜索模型"><template #prefix><icon-search /></template></a-input>
-          <a-select v-if="supplier === 'auto'" v-model="modelRealm" style="width: 140px" aria-label="按平台筛选"><a-option value="">全部平台</a-option><a-option value="cn">WorkBuddy CN</a-option><a-option value="global">WorkBuddy Global</a-option><a-option value="minimax">MiniMax</a-option><a-option value="qoder">Qoder</a-option><a-option value="trae">Trae</a-option><a-option value="antigravity">Antigravity</a-option><a-option value="doubao">豆包</a-option></a-select>
+          <a-select v-if="supplier === 'auto'" v-model="modelRealm" style="width: 140px" aria-label="按平台筛选"><a-option value="">全部平台</a-option><a-option value="cn">WorkBuddy CN</a-option><a-option value="global">WorkBuddy Global</a-option><a-option value="minimax">MiniMax</a-option><a-option value="qoder">Qoder</a-option><a-option value="trae">Trae</a-option><a-option value="antigravity">Antigravity</a-option></a-select>
           <a-select v-model="modelSort" style="width: 160px" aria-label="排序方式"><a-option value="default">上游默认顺序</a-option><a-option value="credits">积分倍率低→高</a-option><a-option value="context">上下文大→小</a-option><a-option value="output">最大输出大→小</a-option><a-option value="name">模型 ID A→Z</a-option></a-select>
         </div>
         <a-scrollbar class="table-scroll" outer-class="table-wrap"><table>

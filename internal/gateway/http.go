@@ -18,12 +18,6 @@ func (r *Router) headers(p string, c Credential) http.Header {
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "text/event-stream")
 	switch p {
-	case "doubao":
-		h.Set("Cookie", c.Token)
-		h.Set("agw-js-conv", "str, str")
-		h.Set("Origin", "https://www.doubao.com")
-		h.Set("Referer", "https://www.doubao.com/chat/")
-		h.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 	case "antigravity":
 		h.Set("Authorization", "Bearer "+c.Token)
 		h.Set("User-Agent", "antigravity/hub/2.29.1 (aidev_client; os_type=windows; arch=amd64; cl=1015941558)")
@@ -85,9 +79,6 @@ func (r *Router) request(ctx context.Context, p, method, path string, c Credenti
 }
 
 func (r *Router) fetchModels(ctx context.Context, p string, c Credential) ([]Model, error) {
-	if p == "doubao" {
-		return doubaoWorkModels(), nil
-	}
 	if p == "minimax" {
 		return []Model{
 			{ID: "MiniMax-M3", Fields: map[string]any{"name": "MiniMax-M3", "context_length": 512000, "max_output_tokens": 128000, "supports_reasoning": true, "supports_images": true, "supports_tool_call": true, "catalog_source": "native_builtin"}},
@@ -168,9 +159,6 @@ func (r *Router) fetchModels(ctx context.Context, p string, c Credential) ([]Mod
 }
 
 func (r *Router) chat(ctx context.Context, p string, c Credential, m Model, request map[string]any, session string, emit Emit) error {
-	if p == "doubao" {
-		return r.doubaoChat(ctx, c, m, request, emit)
-	}
 	if p == "antigravity" {
 		return r.antigravityChat(ctx, c, m, request, session, emit)
 	}

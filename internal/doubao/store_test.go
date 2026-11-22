@@ -38,14 +38,11 @@ func TestAccountLifecycleIdentityAndCredentialIsolation(t *testing.T) {
 	}
 	ctx := context.Background()
 	a, err := s.Add(ctx, Account{Cookie: "first-private-session"}, "")
-	if err != nil || a.AccountUID != "1234567890123456789" || !a.CheckinSupported || !a.BalanceKnown || a.Credits != 200 || a.Total != 200 || len(a.Quotas) != 2 {
+	if err != nil || a.AccountUID != "1234567890123456789" || !a.BalanceKnown || a.Credits != 200 || a.Total != 200 || len(a.Quotas) != 2 {
 		t.Fatalf("bad identity or capabilities: %+v %v", a, err)
 	}
 	if _, err = s.Action(ctx, a.UID, "disable"); err != nil {
 		t.Fatal(err)
-	}
-	if _, err = s.GatewayCredential(ctx, a.UID); err == nil {
-		t.Fatal("disabled credential was selectable")
 	}
 	if _, err = s.Add(ctx, Account{Cookie: "second-private-session"}, ""); err != nil {
 		t.Fatal(err)
@@ -67,16 +64,8 @@ func TestAccountLifecycleIdentityAndCredentialIsolation(t *testing.T) {
 	if _, err = s.Action(ctx, a.UID, "revive"); err != nil {
 		t.Fatal(err)
 	}
-	credential, err := s.GatewayCredential(ctx, a.UID)
-	if err != nil || !strings.Contains(credential.Token, "second-private-session") {
-		t.Fatalf("credential not updated: %v", err)
-	}
 	if _, err = s.Add(ctx, Account{Cookie: "expired-private-session"}, a.UID); err == nil || strings.Contains(err.Error(), "expired-private-session") {
 		t.Fatal("expired credential accepted or leaked")
-	}
-	credential, _ = s.GatewayCredential(ctx, a.UID)
-	if !strings.Contains(credential.Token, "second-private-session") {
-		t.Fatal("failed validation overwrote valid credential")
 	}
 	raw, _ := json.Marshal(s.List())
 	if strings.Contains(string(raw), "private-session") || strings.Contains(string(raw), "sessionid") {

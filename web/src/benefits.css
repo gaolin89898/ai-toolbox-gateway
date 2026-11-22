@@ -42,6 +42,9 @@
 .task-symbol.available, .reward-symbol.warm { color: var(--warning); background: var(--warning-soft); }
 .task-identity > div { min-width: 0; }
 .task-identity strong { font-size: 12px; font-weight: 500; }
+.task-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 1px 0 2px; }
+.task-platform { display: inline-flex; padding: 0 6px; border-radius: 5px; font-size: 10px; line-height: 17px; color: var(--muted); background: var(--surface-secondary); border: 1px solid var(--line); }
+.task-platform.multi { color: var(--accent); background: var(--accent-soft); border-color: transparent; font-weight: 500; }
 .benefit-aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .benefit-side-section { padding: 20px; }
 .benefit-side-section > .inline-between { margin-bottom: 18px; flex-wrap: wrap; }

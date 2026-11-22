@@ -1,6 +1,6 @@
 # DSH ai-toolbox-gateway
 
-独立 Vue 页面与 DSH 插件入口，当前版本 **0.1.70**。Go 后端仍由本机单独运行；插件不启动、停止或打包 Go 程序，不读取 `config.json`、`auths/` 或 `data/`。
+独立 Vue 页面与 DSH 插件入口，当前版本 **0.1.71**。Go 后端仍由本机单独运行；插件不启动、停止或打包 Go 程序，不读取 `config.json`、`auths/` 或 `data/`。
 
 ## 后端运行状态与密钥（本页可查）
 
@@ -23,7 +23,9 @@ npm test
 npm pack
 ```
 
-构建生成 `web/dist/` 和插件的 `public/`，打包生成 `dsh-workbuddy-accounts-0.1.70.tgz`。包内只包含页面、DSH 入口和本机接口转发代码，不包含账号数据、密钥或 Go 二进制。
+构建生成 `web/dist/` 和插件的 `public/`，打包生成 `dsh-workbuddy-accounts-0.1.71.tgz`。包内只包含页面、DSH 入口和本机接口转发代码，不包含账号数据、密钥或 Go 二进制。
+
+0.1.71 定时任务页任务名旁新增平台标识徽章：每日签到标注多平台（WorkBuddy/Trae/MiniMax/Qoder 高亮徽章），其余 8 个任务标注 WorkBuddy，一眼区分任务归属。配套后端同版本更新（旅行/活跃/夜猫子/连登不再对企业切换会话门控，实测旅行领奖到账）。
 
 0.1.70 重新打包当前页面，包含日志分页和用量、日志自动刷新。配套后端新增豆包文本工具调用桥接；豆包上游仍存在 delegated input protocol violation，更新插件不代表该协议问题已解决。
 

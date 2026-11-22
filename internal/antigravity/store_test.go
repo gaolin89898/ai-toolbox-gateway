@@ -133,7 +133,8 @@ func TestRefreshFailureDoesNotLeakOrOverwrite(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "private") {
 		t.Fatal("refresh failure leaked upstream body")
 	}
-	if s.snapshot()[0] != original {
+	got := s.snapshot()[0]
+	if got.AccessToken != original.AccessToken || got.RefreshToken != original.RefreshToken || !got.ExpiresAt.Equal(original.ExpiresAt) {
 		t.Fatal("failed refresh changed account")
 	}
 	raw, err := os.ReadFile(s.path)

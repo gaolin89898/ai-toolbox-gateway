@@ -8,8 +8,8 @@ import minimaxIcon from '../assets/platform-minimax.png';
 import doubaoIcon from '../assets/platform-doubao.png';
 import antigravityIcon from '../assets/platform-antigravity.svg';
 
-const props = defineProps({ model: Object });
-const platforms = [
+const props = defineProps({ model: Object, exclude: { type: Array, default: () => [] }, only: { type: Array, default: () => [] } });
+const allPlatforms = [
   { id: 'workbuddy-cn', name: 'WorkBuddy 国内版', icon: workbuddyIcon },
   { id: 'workbuddy-global', name: 'WorkBuddy 国际版', icon: workbuddyIcon },
   { id: 'trae', name: 'Trae', icon: traeIcon },
@@ -18,7 +18,8 @@ const platforms = [
   { id: 'antigravity', name: 'Antigravity', icon: antigravityIcon },
   { id: 'doubao', name: '豆包', icon: doubaoIcon },
 ];
-const platformById = Object.fromEntries(platforms.map(item => [item.id, item]));
+const platforms = computed(() => allPlatforms.filter(item => (!props.only.length || props.only.includes(item.id)) && !props.exclude.includes(item.id)));
+const platformById = Object.fromEntries(allPlatforms.map(item => [item.id, item]));
 const counts = computed(() => ({
   'workbuddy-cn': props.model.workbuddyAccounts.filter(account => account.realm !== 'global').length,
   'workbuddy-global': props.model.workbuddyAccounts.filter(account => account.realm === 'global').length,

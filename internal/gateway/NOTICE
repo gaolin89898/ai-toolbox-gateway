@@ -47,9 +47,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-
-Doubao protocol information: https://www.doubao.com/chat/ and
-https://github.com/Bitsea1/doubao-free-api (GPL-3.0).
-The Doubao Go adapter is an independent implementation of the web protocol;
-no reference-project source code is incorporated.

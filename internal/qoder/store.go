@@ -23,6 +23,7 @@ type Account struct {
 	RefreshToken     string    `json:"refresh_token"`
 	PAT              string    `json:"pat,omitempty"`
 	MachineID        string    `json:"machine_id"`
+	UserType         string    `json:"user_type,omitempty"`
 	ExpiresAt        time.Time `json:"expires_at"`
 	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
 	Disabled         bool      `json:"disabled"`
@@ -45,6 +46,8 @@ type Status struct {
 	Total            float64   `json:"credits_total"`
 	BalanceKnown     bool      `json:"balance_known"`
 	BalanceUpdatedAt time.Time `json:"balance_updated_at"`
+	UserType         string    `json:"user_type,omitempty"`
+	CheckinSupported bool      `json:"checkin_supported"`
 	CheckinDone      bool      `json:"checkin_done"`
 	TokenExpiresAt   time.Time `json:"token_expires_at"`
 	HasRefresh       bool      `json:"has_refresh"`
@@ -53,7 +56,21 @@ type Status struct {
 }
 
 func status(a Account) Status {
-	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "qoder", Realm: "cn", Disabled: a.Disabled, Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, CheckinDone: a.LastPeriod == RewardPeriod(time.Now()) && a.ClaimedUntil.After(time.Now()), TokenExpiresAt: a.ExpiresAt, HasRefresh: a.RefreshToken != "" || a.PAT != "", DesktopSupported: strings.HasPrefix(a.Token, "dt-") && strings.HasPrefix(a.RefreshToken, "drt-"), LastError: a.LastError}
+	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "qoder", Realm: "cn", Disabled: a.Disabled, Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, UserType: a.UserType, CheckinSupported: CheckinSupported(a.UserType), CheckinDone: a.LastPeriod == RewardPeriod(time.Now()) && a.ClaimedUntil.After(time.Now()), TokenExpiresAt: a.ExpiresAt, HasRefresh: a.RefreshToken != "" || a.PAT != "", DesktopSupported: strings.HasPrefix(a.Token, "dt-") && strings.HasPrefix(a.RefreshToken, "drt-"), LastError: a.LastError}
+}
+
+// CheckinSupported reports whether the account's Qoder plan can claim the daily
+// 100-credit reward. Qoder stopped granting it to free personal plans in late
+// 2026: those accounts report userType personal_standard / personal_free.
+func CheckinSupported(userType string) bool {
+	t := strings.ToLower(strings.TrimSpace(userType))
+	if t == "" {
+		return true // Unknown plan keeps the legacy behaviour instead of hiding check-in.
+	}
+	if strings.Contains(t, "free") || strings.Contains(t, "standard") {
+		return false
+	}
+	return true
 }
 
 type Store struct {
@@ -262,6 +279,9 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, string, 
 			a.Disabled = false
 			a.LastError = ""
 		case "checkin", "balance":
+			if action == "checkin" && !CheckinSupported(a.UserType) {
+				return status(*a), "", nil
+			}
 			if action == "checkin" && a.Disabled {
 				return status(*a), "", fmt.Errorf("该 Qoder 账号已停用")
 			}
@@ -307,7 +327,7 @@ func (s *Store) RunAll(ctx context.Context, action string) []string {
 		if ctx.Err() != nil {
 			break
 		}
-		if a.Disabled || action == "checkin" && a.CheckinDone {
+		if a.Disabled || action == "checkin" && (a.CheckinDone || !CheckinSupported(a.UserType)) {
 			continue
 		}
 		_, _, err := s.Action(ctx, a.UID, action)

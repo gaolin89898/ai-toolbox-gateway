@@ -368,7 +368,7 @@ func annotateModelLabel(model map[string]any) {
 		return
 	}
 	providerNames := map[string]string{
-		"doubao": "豆包", "antigravity": "Antigravity", "minimax": "MiniMax", "qoder": "Qoder", "trae": "Trae",
+		"antigravity": "Antigravity", "minimax": "MiniMax", "qoder": "Qoder", "trae": "Trae",
 	}
 	vendor, _ := model["vendor"].(string)
 	if vendor == "" {

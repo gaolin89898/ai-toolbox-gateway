@@ -188,14 +188,13 @@ func newAppRuntime(configPath string, cfg *Config, gateway bool) (*appRuntime, e
 	}
 
 	// 签到入口（自动排程 / 启动补签 / 面板手动触发共用）：
-	// WorkBuddy 池签到由 scheduler 负责，Trae / MiniMax / 豆包 经 CheckinHook
-	// 同批执行（Antigravity 不做签到）。
+	// WorkBuddy 池签到由 scheduler 负责，Trae / MiniMax 经 CheckinHook
+	// 同批执行（Antigravity、豆包不做签到）。
 	runSideCheckin := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		rt.trae.RunAll(ctx, "checkin")
 		rt.minimax.RunAll(ctx, "checkin")
-		rt.doubao.RunAll(ctx, "checkin")
 	}
 	// 调度器：签到永远按 account-settings.json；网关任务族（旅行/活跃/保活/
 	// 夜猫子/成长/连登）仅网关模式按 config 生效——账号模式恒关，且迁移已把
@@ -358,7 +357,6 @@ func applySideRefresh(rt *appRuntime) {
 	rt.trae.SetRefreshEnabled(refresh)
 	rt.qoder.SetRefreshEnabled(refresh)
 	rt.minimax.SetRefreshEnabled(refresh)
-	rt.doubao.SetRefreshEnabled(refresh)
 }
 
 // logSchedulerStatus 启动日志：说明各任务族的实际生效状态。

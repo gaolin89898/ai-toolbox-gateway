@@ -17,8 +17,24 @@ export function formatNumber(value) { return Number(value || 0).toLocaleString('
 export function canCheckin(account) { return !account.disabled && !account.enterprise && account.realm !== 'global' && account.checkin_supported !== false; }
 export function accountEdition(account) { return account.provider === 'doubao' ? '豆包' : account.provider === 'antigravity' ? 'Antigravity' : account.provider === 'minimax' ? 'MiniMax 国内版' : account.provider === 'qoder' ? 'Qoder 国内版' : account.provider === 'trae' ? 'Trae 国内版' : account.enterprise ? '企业版' : account.realm === 'global' ? '国际版' : '国内版'; }
 export function accountCredits(account) { return account.balance_known === false ? '--' : formatNumber(account.provider === 'doubao' ? account.available_credits ?? account.credits : account.credits); }
+export function planLabel(userType) {
+  const t = String(userType || '').toLowerCase();
+  if (!t) return '';
+  if (t.includes('standard')) return '个人标准版';
+  if (t.includes('free')) return '免费版';
+  if (t.includes('plus')) return '个人专业增强版';
+  if (t.includes('pro')) return '个人专业版';
+  if (t.includes('ultra') || t.includes('max')) return '个人旗舰版';
+  if (t.includes('team')) return '团队版';
+  if (t.includes('enterprise')) return '企业版';
+  return userType;
+}
 export function checkinState(account) {
-  if (account.provider === 'qoder') return account.checkin_done ? { text: '本轮已领取', kind: 'success' } : account.disabled ? { text: '已暂停', kind: 'muted' } : { text: '本轮待领取', kind: 'warning' };
+  if (account.provider === 'qoder') {
+    if (account.disabled) return { text: '已暂停', kind: 'muted' };
+    if (account.checkin_supported === false) return { text: '不支持', kind: 'muted' };
+    return account.checkin_done ? { text: '本轮已领取', kind: 'success' } : { text: '本轮待领取', kind: 'warning' };
+  }
   if (account.enterprise || account.realm === 'global' || account.checkin_supported === false) return { text: '不支持签到', kind: 'muted' };
   if (account.checkin_done) return { text: '已签到', kind: 'success' };
   if (account.disabled) return { text: '已暂停', kind: 'muted' };

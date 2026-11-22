@@ -304,3 +304,46 @@ func TestStoreIdentityGuardRefreshRotationAndPublicStatus(t *testing.T) {
 		t.Fatal("remove did not persist")
 	}
 }
+
+func TestCheckinSupportedByUserType(t *testing.T) {
+	for _, tc := range []struct {
+		userType  string
+		supported bool
+	}{
+		{"personal_standard", false},
+		{"personal_free", false},
+		{"free", false},
+		{"personal_pro", true},
+		{"team", true},
+		{"", true},
+	} {
+		if got := CheckinSupported(tc.userType); got != tc.supported {
+			t.Fatalf("CheckinSupported(%q) = %v, want %v", tc.userType, got, tc.supported)
+		}
+	}
+}
+
+func TestBalanceRecordsUserType(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"qoderUsage":{"userId":"a","userType":"personal_standard","userQuota":{"remaining":0,"total":0}}}`))
+	})
+	a := Account{AccountUID: "a"}
+	if err := c.balance(context.Background(), &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.UserType != "personal_standard" || CheckinSupported(a.UserType) {
+		t.Fatalf("free plan not detected: %+v", a)
+	}
+}
+
+func TestFreePlanCheckinDoesNotContactUpstream(t *testing.T) {
+	calls := 0
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) { calls++ })
+	a := Account{AccountUID: "a", UserType: "personal_standard"}
+	if err := c.checkin(context.Background(), &a, true); err != nil || calls != 0 {
+		t.Fatalf("free plan checkin contacted upstream: calls=%d err=%v", calls, err)
+	}
+	if a.LastPeriod != "" || !a.ClaimedUntil.IsZero() {
+		t.Fatalf("free plan checkin mutated state: %+v", a)
+	}
+}

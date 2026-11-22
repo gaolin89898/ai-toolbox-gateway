@@ -15,7 +15,7 @@ const tabs = computed(() => [...[
   { id: 'settings', name: '签到设置', icon: IconCalendar },
   { id: 'schedules', name: '定时任务', icon: IconCalendarClock },
   { id: 'logs', name: '运行日志', icon: IconFile },
-], ...(props.model.capabilities?.gateway ? [{ id: 'gateway', name: '网关', icon: IconThunderbolt }] : [])]);
+].filter(tab => !(props.model.provider === 'doubao' && tab.id === 'tasks')), ...(props.model.capabilities?.gateway ? [{ id: 'gateway', name: '网关', icon: IconThunderbolt }] : [])]);
 // API Access 卡（设计稿 Sidebar 扩展，仅网关页显示）：端点与密钥复制。
 const apiKey = computed(() => props.model.managementKey || '');
 function copyKey() {

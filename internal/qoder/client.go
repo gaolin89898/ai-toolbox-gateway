@@ -303,6 +303,7 @@ func (c *Client) balance(ctx context.Context, a *Account) error {
 	if q == nil {
 		return fmt.Errorf("Qoder 用量响应未包含可识别的余额")
 	}
+	a.UserType = text(q, "userType", "user_type")
 	if uid := text(q, "userId", "user_id"); uid != "" && uid != a.AccountUID {
 		return fmt.Errorf("Qoder 用量账号不一致")
 	}
@@ -398,6 +399,9 @@ func confirmedCampaign(list []Campaign, id string, now time.Time) bool {
 	return false
 }
 func (c *Client) checkin(ctx context.Context, a *Account, claim bool) error {
+	if !CheckinSupported(a.UserType) {
+		return nil
+	}
 	list, err := c.campaigns(ctx, a)
 	if err != nil {
 		return err

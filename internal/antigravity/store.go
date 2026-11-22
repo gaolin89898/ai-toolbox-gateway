@@ -23,8 +23,12 @@ type Account struct {
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	ProjectID    string    `json:"project_id"`
-	Tier         string    `json:"tier"`
-	Disabled     bool      `json:"disabled"`
+	Tier           string        `json:"tier"`
+	Disabled       bool          `json:"disabled"`
+	QuotaGroups    []QuotaGroup  `json:"quota_groups,omitempty"`
+	QuotaKnown     bool          `json:"quota_known"`
+	QuotaUpdatedAt time.Time     `json:"quota_updated_at,omitempty"`
+	LastError      string        `json:"last_error,omitempty"`
 }
 
 type Status struct {
@@ -34,16 +38,20 @@ type Status struct {
 	Provider         string    `json:"provider"`
 	Realm            string    `json:"realm"`
 	ProjectID        string    `json:"project_id"`
-	Tier             string    `json:"tier"`
-	Disabled         bool      `json:"disabled"`
-	HasRefresh       bool      `json:"has_refresh"`
+	Tier             string        `json:"tier"`
+	Disabled         bool          `json:"disabled"`
+	QuotaGroups      []QuotaGroup  `json:"quota_groups,omitempty"`
+	QuotaKnown       bool          `json:"quota_known"`
+	QuotaUpdatedAt   time.Time     `json:"quota_updated_at,omitempty"`
+	LastError        string        `json:"last_error,omitempty"`
+	HasRefresh       bool          `json:"has_refresh"`
 	CheckinSupported bool      `json:"checkin_supported"`
 	BalanceKnown     bool      `json:"balance_known"`
 	ExpiresAt        time.Time `json:"expires_at"`
 }
 
 func status(a Account) Status {
-	return Status{UID: a.ID, AccountUID: a.Email, Nickname: a.Nickname, Provider: "antigravity", Realm: "global", ProjectID: a.ProjectID, Tier: a.Tier, Disabled: a.Disabled, HasRefresh: a.RefreshToken != "", ExpiresAt: a.ExpiresAt}
+	return Status{UID: a.ID, AccountUID: a.Email, Nickname: a.Nickname, Provider: "antigravity", Realm: "global", ProjectID: a.ProjectID, Tier: a.Tier, Disabled: a.Disabled, QuotaGroups: append([]QuotaGroup{}, a.QuotaGroups...), QuotaKnown: a.QuotaKnown, QuotaUpdatedAt: a.QuotaUpdatedAt, LastError: a.LastError, HasRefresh: a.RefreshToken != "", ExpiresAt: a.ExpiresAt}
 }
 
 type Store struct {
@@ -210,6 +218,12 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, error) {
 			if err := s.client.Inspect(ctx, a); err != nil {
 				return Status{}, err
 			}
+			groups, quotaErr := s.client.Quotas(ctx, a)
+			if quotaErr != nil {
+				a.LastError = quotaErr.Error()
+			} else {
+				a.QuotaGroups, a.QuotaKnown, a.QuotaUpdatedAt, a.LastError = groups, true, time.Now(), ""
+			}
 		default:
 			return Status{}, fmt.Errorf("不支持的 Antigravity 账号操作")
 		}
@@ -245,7 +259,7 @@ func (s *Store) GatewayCredential(ctx context.Context, id string) (gateway.Crede
 		if a.Disabled {
 			return gateway.Credential{}, fmt.Errorf("Antigravity 账号已停用")
 		}
-		before := *a
+		beforeToken, beforeRefresh, beforeExpiry := a.AccessToken, a.RefreshToken, a.ExpiresAt
 		if err := s.client.Refresh(ctx, a); err != nil {
 			return gateway.Credential{}, err
 		}
@@ -254,7 +268,7 @@ func (s *Store) GatewayCredential(ctx context.Context, id string) (gateway.Crede
 				return gateway.Credential{}, err
 			}
 		}
-		if *a != before {
+		if a.AccessToken != beforeToken || a.RefreshToken != beforeRefresh || !a.ExpiresAt.Equal(beforeExpiry) {
 			if err := s.commit(accounts); err != nil {
 				return gateway.Credential{}, err
 			}

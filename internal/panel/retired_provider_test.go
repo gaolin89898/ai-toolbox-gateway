@@ -10,6 +10,24 @@ import (
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
 )
 
+func TestRetiredDoubaoTaskAndCheckinEndpoints(t *testing.T) {
+	accounts := pool.New("")
+	defer accounts.Close()
+	p := New(Config{AccountsOnly: true, Pool: accounts, APIKey: "test-key"})
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/panel/api/doubao/checkin_all"},
+		{http.MethodPost, "/panel/api/doubao/accounts/d1/tasks/claim"},
+	} {
+		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader("{}"))
+		r.Header.Set("Authorization", "Bearer test-key")
+		w := httptest.NewRecorder()
+		p.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("retired endpoint %s %s returned %d", tc.method, tc.path, w.Code)
+		}
+	}
+}
+
 func TestRetiredLoomyIntegration(t *testing.T) {
 	accounts := pool.New("")
 	defer accounts.Close()

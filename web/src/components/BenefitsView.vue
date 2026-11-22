@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { Alert as AAlert, Button as AButton, Empty as AEmpty, Input as AInput, Modal as AModal, Option as AOption, Progress as AProgress, Radio as ARadio, RadioGroup as ARadioGroup, Select as ASelect, Spin as ASpin, Table as ATable, TableColumn as ATableColumn, Tag as ATag, Message } from '@arco-design/web-vue';
 import { IconRefresh, IconPlayArrow, IconSearch, IconGift, IconCopy, IconCheck, IconClockCircle, IconArrowRight, IconInfoCircle, IconCalendar, IconThunderbolt } from '@arco-design/web-vue/es/icon';
 import { accountCredits, formatNumber } from '../useAccounts';
-import DoubaoTasks from './DoubaoTasks.vue';
 
 const props = defineProps({ model: Object, section: String });
 const uid = ref(''), loading = ref(false), working = ref(false), error = ref(''), result = ref('');
@@ -214,8 +213,7 @@ watch([() => props.section, workbuddyReady], ([section, ready]) => { if (section
 </script>
 
 <template>
-  <DoubaoTasks v-if="section === 'tasks' && model.provider === 'doubao'" :model="model"><template #platform-switcher><slot name="platform-switcher" /></template></DoubaoTasks>
-  <section v-else :class="['benefits-view', 'benefits-' + section]">
+  <section :class="['benefits-view', 'benefits-' + section]">
     <header class="page-heading benefit-heading">
       <div class="page-toolbar"><slot name="platform-switcher" /><div class="heading-actions">
         <template v-if="section === 'tasks' && supported">
@@ -299,7 +297,7 @@ watch([() => props.section, workbuddyReady], ([section, ready]) => { if (section
       <template v-else>
         <template v-if="model.provider === 'qoder' && model.qoderAccounts.length">
           <div class="reward-feature"><div><div class="eyebrow">DAILY REWARD · QODER</div><h2>每日 100 Credits</h2><p>领取状态以平台当前返回的结果为准</p></div><icon-gift class="reward-feature-icon" /></div>
-          <div class="reward-grid"><article v-for="item in model.qoderAccounts" :key="item.uid" class="reward-item"><span class="reward-symbol"><icon-gift /></span><a-tag>{{ item.checkin_done ? '本轮已领取' : '本轮待领取' }}</a-tag><h3>{{ model.accountName(item) }}</h3><p>当前余额 {{ accountCredits(item) }} 积分</p><div class="reward-amount">+100 <small>Credits</small></div><a-button long :disabled="item.disabled || item.checkin_done" :loading="model.busy.has(item.uid + ':checkin')" @click="model.accountAction(item, 'checkin').catch(() => {})">领取奖励</a-button></article></div>
+          <div class="reward-grid"><article v-for="item in model.qoderAccounts" :key="item.uid" class="reward-item"><span class="reward-symbol"><icon-gift /></span><a-tag>{{ item.checkin_supported === false ? '不支持' : item.checkin_done ? '本轮已领取' : '本轮待领取' }}</a-tag><h3>{{ model.accountName(item) }}</h3><p>当前余额 {{ accountCredits(item) }} 积分</p><div class="reward-amount">+100 <small>Credits</small></div><a-button long :disabled="item.disabled || item.checkin_done || item.checkin_supported === false" :loading="model.busy.has(item.uid + ':checkin')" @click="model.accountAction(item, 'checkin').catch(() => {})">{{ item.checkin_supported === false ? '不支持领取' : '领取奖励' }}</a-button></article></div>
         </template>
         <template v-else-if="workbuddyReady">
           <div class="benefit-toolbar reward-account-select"><a-select :model-value="uid" :disabled="working" placeholder="选择账号" aria-label="查看账号" @change="selectAccount"><a-option v-for="item in options" :key="item.uid" :value="item.uid">{{ model.accountName(item) }}</a-option></a-select><span class="benefit-toolbar-hint">{{ account ? '当前账号 · ' + model.accountName(account) : '请选择国内版个人账号' }}</span></div>

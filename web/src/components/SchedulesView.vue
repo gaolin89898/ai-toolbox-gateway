@@ -16,15 +16,15 @@ const families = computed(() => {
   const d = draft.value;
   if (!d) return [];
   return [
-    { id: 'checkin', name: '每日签到', desc: 'WorkBuddy + Trae + MiniMax 同批；Qoder 活动轮次顺延至 10:00 起', plan: d.checkin_hours, enabled: d.checkin_enabled, statusKey: 'checkin', readonly: true },
-    { id: 'travel', name: '旅行巡检', desc: '一趟派出 + 一趟领奖闭环', plan: d.travel_hours, enabled: d.travel_enabled, key: 'travel', statusKey: 'travel' },
-    { id: 'activity', name: '活跃上报', desc: '点亮连登 + 解锁领养前置', plan: d.activity_hours, enabled: d.activity_enabled, key: 'activity', statusKey: 'activity' },
-    { id: 'keepalive', name: 'Token 保活', desc: '刷新登录凭证，会话死亡自动禁用', plan: d.keepalive_hours, enabled: d.keepalive_enabled, key: 'keepalive', statusKey: 'keepalive' },
-    { id: 'blackcat', name: '夜猫子', desc: '23:00–08:00 窗口对话补足', plan: d.blackcat_hours, enabled: d.blackcat_enabled, key: 'blackcat', statusKey: 'blackcat' },
-    { id: 'growth', name: '成长任务', desc: '每日到点自动扫描并执行全部待办', plan: d.growth_hours, enabled: d.growth_enabled, key: 'growth', statusKey: 'growth' },
-    { id: 'streak', name: '连登管家', desc: '签到后自动兑换连登档位并抽完抽奖机会', plan: [], enabled: d.streak_enabled, key: 'streak', statusKey: 'streak', follows: 'checkin' },
-    { id: 'sweep', name: '任务补领清扫', desc: '周期领取「已达标未领奖」的成长任务奖励（幂等）', interval: d.task_sweep_minutes, enabled: d.task_sweep_enabled, key: 'task_sweep', statusKey: 'sweep' },
-    { id: 'balance', name: '余额后台刷新', desc: '只读刷新额度与到期快照，含解冻语义', interval: d.balance_refresh_minutes, enabled: d.balance_refresh_enabled, key: 'balance_refresh', statusKey: 'balance' },
+    { id: 'checkin', name: '每日签到', desc: 'WorkBuddy + Trae + MiniMax 同批；Qoder 活动轮次顺延至 10:00 起', platforms: ['WorkBuddy', 'Trae', 'MiniMax', 'Qoder'], plan: d.checkin_hours, enabled: d.checkin_enabled, statusKey: 'checkin', readonly: true },
+    { id: 'travel', name: '旅行巡检', desc: '一趟派出 + 一趟领奖闭环', platforms: ['WorkBuddy'], plan: d.travel_hours, enabled: d.travel_enabled, key: 'travel', statusKey: 'travel' },
+    { id: 'activity', name: '活跃上报', desc: '点亮连登 + 解锁领养前置', platforms: ['WorkBuddy'], plan: d.activity_hours, enabled: d.activity_enabled, key: 'activity', statusKey: 'activity' },
+    { id: 'keepalive', name: 'Token 保活', desc: '刷新登录凭证，会话死亡自动禁用', platforms: ['WorkBuddy'], plan: d.keepalive_hours, enabled: d.keepalive_enabled, key: 'keepalive', statusKey: 'keepalive' },
+    { id: 'blackcat', name: '夜猫子', desc: '23:00–08:00 窗口对话补足', platforms: ['WorkBuddy'], plan: d.blackcat_hours, enabled: d.blackcat_enabled, key: 'blackcat', statusKey: 'blackcat' },
+    { id: 'growth', name: '成长任务', desc: '每日到点自动扫描并执行全部待办', platforms: ['WorkBuddy'], plan: d.growth_hours, enabled: d.growth_enabled, key: 'growth', statusKey: 'growth' },
+    { id: 'streak', name: '连登管家', desc: '签到后自动兑换连登档位并抽完抽奖机会', platforms: ['WorkBuddy'], plan: [], enabled: d.streak_enabled, key: 'streak', statusKey: 'streak', follows: 'checkin' },
+    { id: 'sweep', name: '任务补领清扫', desc: '周期领取「已达标未领奖」的成长任务奖励（幂等）', platforms: ['WorkBuddy'], interval: d.task_sweep_minutes, enabled: d.task_sweep_enabled, key: 'task_sweep', statusKey: 'sweep' },
+    { id: 'balance', name: '余额后台刷新', desc: '只读刷新额度与到期快照，含解冻语义', platforms: ['WorkBuddy'], interval: d.balance_refresh_minutes, enabled: d.balance_refresh_enabled, key: 'balance_refresh', statusKey: 'balance' },
   ];
 });
 const enabledCount = computed(() => families.value.filter(f => f.enabled).length);
@@ -189,7 +189,7 @@ function pauseAll() {
           <thead><tr><th>任务</th><th>计划</th><th>上次运行</th><th>下次运行</th><th>状态</th><th>启用</th></tr></thead>
           <tbody>
             <tr v-for="family in families" :key="family.id">
-              <td><div class="task-identity"><span class="task-symbol"><icon-calendar /></span><div><strong>{{ family.name }}</strong><small class="benefit-detail">{{ family.desc }}</small></div></div></td>
+              <td><div class="task-identity"><span class="task-symbol"><icon-calendar /></span><div><span class="task-name-row"><strong>{{ family.name }}</strong><span v-for="p in family.platforms" :key="p" class="task-platform" :class="{ multi: family.platforms.length > 1 }">{{ p }}</span></span><small class="benefit-detail">{{ family.desc }}</small></div></div></td>
               <td><div class="schedule-chips"><template v-if="family.interval"><span class="schedule-chip">{{ family.interval }} 分钟</span></template><template v-else-if="family.plan?.length"><span v-for="hour in family.plan" :key="hour" class="schedule-chip">{{ formatHour(hour) }}</span></template><template v-else-if="family.follows"><span class="schedule-chip">跟随签到</span></template><template v-else>—</template></div></td>
               <td>{{ lastRunText(family) }}</td>
               <td>{{ nextRunText(family) }}</td>

@@ -41,9 +41,6 @@ func TestLive(t *testing.T) {
 		if c.Token == "" {
 			c.Token = str(a["credential"])
 		}
-		if provider == "doubao" {
-			c.Token = str(a["cookie"])
-		}
 		if provider == "antigravity" {
 			c.Token = str(a["access_token"])
 			c.ProjectID = str(a["project_id"])

@@ -5,7 +5,7 @@
 <h1 align="center">WorkBuddy2API Panel</h1>
 
 <p align="center">
-  <b>WorkBuddy · Trae · Qoder · MiniMax · Antigravity · 豆包 账号管理与每日签到 · 可选 OpenAI 兼容网关</b><br>
+  <b>WorkBuddy · Trae · Qoder · MiniMax · Antigravity · 豆包 账号管理与额度查询 · 可选 OpenAI 兼容网关</b><br>
   AI 工具箱 · Windows 桌面窗口 · DSH 插件 · 账号切换 · 成长任务 · 活动奖励 · 状态持久化
 </p>
 
@@ -26,7 +26,7 @@
 
 ## 项目简介
 
-WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **WorkBuddy / Trae / Qoder / MiniMax / Antigravity / 豆包** 六个平台的账号（Antigravity 不做签到、不提供积分余额；豆包展示订阅与额度，并支持每日签到），支持本机 Windows 客户端账号切换、WorkBuddy 成长任务与活动奖励。页面可通过浏览器、Windows 桌面窗口或 DSH 插件使用，账号和设置由 Go 后端持久保存。
+WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **WorkBuddy / Trae / Qoder / MiniMax / Antigravity / 豆包** 六个平台的账号（Antigravity 与豆包不做签到；豆包展示订阅与额度），支持本机 Windows 客户端账号切换、WorkBuddy 成长任务与活动奖励。页面可通过浏览器、Windows 桌面窗口或 DSH 插件使用，账号和设置由 Go 后端持久保存。
 
 直接运行程序进入账号管理模式；需要为个人工具提供 OpenAI 兼容接口时，使用同一程序加上 `-gateway`。
 
@@ -47,7 +47,6 @@ WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **
 | MiniMax | `minimax/MiniMax-M3` | 原生 Anthropic Messages 转换；聊天、工具调用和用量已实测；需要 OAuth / Bearer 登录，Cookie 仅供账号管理 |
 | Qoder CN | `qoder/fast` | COSY 签名接口与 SSE 信封解包；动态目录、聊天、工具调用和用量已实测 |
 | Trae CN | `trae/Doubao-Seed-Code` | IDE raw-v2 适配；目录已验证，当前实测账号均返回流内限流，聊天暂未通过真实成功验证 |
-| 豆包 | `doubao/person-deepseek-v4-1-flash-261017` 等 | 豆包工作协议（桌面客户端会话）；按官方 `model_item_key` 选择 DeepSeek / Kimi / GLM / 豆包 2.1 等模型，文本流式与非流式已实测 |
 | Antigravity | `antigravity/模型ID` | Google OAuth + 原生 Gemini 协议转换；动态目录、文本、思考、Base64 图片和工具调用；具体模型 ID 以账号目录为准 |
 
 新增平台均通过 `POST /v1/chat/completions` 接入，支持 `stream: true/false`。模型目录按启用账号合并并缓存 5 分钟；Trae 排除辅助模型、自定义模型占位和隐藏配置。MiniMax 使用桌面端内置的 M3 / M3.1-Flash 目录，账号实际权限以上游响应为准。MiniMax 转换文本、图片、工具历史和思考内容；未适配参数（如 `response_format`）会返回 400。
@@ -60,7 +59,9 @@ Google 请求优先遵循 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 环境配置
 
 豆包在「添加账号 → 豆包」点击「开始网页授权」，在自动打开的独立浏览器窗口中完成网页登录，面板自动读取并验证会话后保存账号，无需复制 sessionid、Cookie 或 Token。请在运行面板的电脑上通过 localhost / 127.0.0.1 使用，并安装桌面版 Edge / Chrome。支持取消授权、同一账号重新授权、备注、启停和移除；更新已有账号时拒绝替换成其他身份。凭证保存在 `state_file` 同目录的 `doubao-accounts.json`，页面和日志不返回 Cookie。登录失效后重新进行网页授权，当前不提供自动续期或客户端切换。
 
-豆包「订阅与额度管理」的活动赠送额度、近 7 天等订阅额度在网页授权后自动查询，也可手动点击「刷新额度」。账号页分别显示各项剩余量、已用量 / 总额与到期时间，顶部只汇总活动剩余额度，周期额度不与活动额度相加。这些额度与视频生成积分钱包不同，已使用真实账号核对。首次查询失败显示未知；后续失败保留上次成功结果，并显示查询时间和错误原因，不将失败视为余额为零。该额度接口不领取奖励或触发活动。豆包每日签到与网页 / 电脑版客户端共用同一套成长任务协议：账号页提供单号与「全部签到」，按任务组回读连续天数、累计签到天数与累计获得额度；服务端按天幂等，当天重复签到返回已签不重复发放，签到成功后按设置顺带刷新额度。协议使用公开网页接口独立实现，签到与状态解析已通过模拟上游测试，并已用真实账号核对回读字段。
+豆包「订阅与额度管理」的活动赠送额度、近 7 天等订阅额度在网页授权后自动查询，也可手动点击「刷新额度」。账号页分别显示各项剩余量、已用量 / 总额与到期时间，顶部只汇总活动剩余额度，周期额度不与活动额度相加。这些额度与视频生成积分钱包不同，已使用真实账号核对。首次查询失败显示未知；后续失败保留上次成功结果，并显示查询时间和错误原因，不将失败视为余额为零。该额度接口不领取奖励或触发活动。
+
+豆包网关支持已于 2026-11-20 移除：网关不再提供 `doubao/*` 模型，旧 `gateway.supplier=doubao` 配置自动回落为「自动」。以下为移除前的协议说明，仅供追溯。
 
 豆包网关走**豆包工作**协议（`POST /chat/completion`），模型 ID 使用官方 `model_item_key`（如 `doubao/person-deepseek-v4-1-flash-261017`、`doubao/seed-lite-7b`、`doubao/person-kimi-k3-261111`），支持 `reasoning_effort` 思考档位；仅支持文本消息，多轮历史合并为文本。**需要先在本机豆包客户端登录**，然后在「添加账号 → 豆包」点「从豆包客户端导入登录态」：面板通过 DPAPI 解出客户端 Cookie 与设备上下文后保存账号，网关只向具备工作会话的账号选号。函数工具通过文本桥接转换为 OpenAI `tool_calls`，支持工具选择、并行开关和多轮结果回传，由调用客户端执行工具；工具会话序列化为 JSON 数据，避免将 DSH 工具指令当成豆包内置工具操作。网关合并块补丁和 `CHUNK_DELTA`，区分思考与正文，去除重复快照，等待完整回答并校验函数名与参数 JSON 后才返回工具调用，不代表上游原生工具能力或严格 Schema 约束。图片、严格工具 Schema 和结构化输出请求会返回 400；工作协议不提供可靠的 token / 积分用量，面板不估算。网页风控或协议变化可能导致请求失败；不会自动绕过验证码，也不会在流中断后重放生成。账号验证、流事件转换、工具桥接和失败处理已通过模拟上游测试。2026-11-17 已用正确导入的客户端账号实测 Kimi K3.1 Pro 普通文本及 DSH 系统提示、`run_code` 定义的工具请求与结果回传；测试中的工具结果由诊断程序提供，未执行返回的代码。
 
@@ -81,9 +82,9 @@ Google 请求优先遵循 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 环境配置
 | 能力 | 说明 |
 |---|---|
 | 多平台账号 | WorkBuddy 浏览器授权与 Cockpit JSON 导入；Trae 国内版直接登录、凭证及备份导入；Qoder 国内版浏览器授权或 PAT；MiniMax 国内版粘贴 Cookie / 令牌；Antigravity 与豆包直接网页授权，无需填写 OAuth 凭证 |
-| 积分与每日签到 | 单号 / 全部签到、余额刷新、停用 / 启用、备注；每日 09:00 / 21:00 默认时刻可修改，Qoder 按 10:00 活动轮次处理 |
+| 积分与每日签到 | 单号 / 全部签到、余额刷新、停用 / 启用、备注；每日 09:00 / 21:00 默认时刻可修改，Qoder 按 10:00 活动轮次处理；免费版账号不再参与每日领取 |
 | 本机客户端切换 | Windows WorkBuddy / WorkBuddy AI、Trae CN、Qoder CN；登录态备份、重启后身份核验和失败回滚，支持自定义安装目录和 Qoder 更新目录 |
-| 成长任务与活动奖励 | WorkBuddy 国内版个人账号扫描待办、执行全部待办、查看队列、领取奖励；豆包工作任务列表、签到、达标奖励及累计额度奖励领取，操作后回读状态 |
+| 成长任务与活动奖励 | WorkBuddy 国内版个人账号扫描待办、执行全部待办、查看队列、领取奖励 |
 | 状态持久化 | 凭证、账号状态、备注和签到设置保存在本地；网关模式额外支持用量归档及可选 Upstash Redis 镜像 |
 | 页面与 DSH 插件 | Vue / Arco Design 页面，适配深浅色和移动布局；DSH「AI 工具箱」使用原生下拉菜单，主题与 Arco 滚动条跟随宿主 |
 | OpenAI 兼容网关 | `-gateway` 下提供聊天补全、模型列表及 Anthropic Messages 兼容联网搜索；流式 / 非流式、推理内容、工具调用和模型档位兼容 |
@@ -110,8 +111,6 @@ MiniMax 国内版（agent.minimaxi.com，实际跳转 agent.minimax.cn）已完�
 ## 成长任务与活动奖励
 
 WorkBuddy 国内版个人账号可在「任务中心」扫描待办、执行单项或全部待办、接受任务及领取奖励。执行会先确认，部分动作会发起真实模型请求并消耗积分；后端等待异步计分并回读任务进度，达标后领取奖励。任务清单、奖励和账号资格以平台当前返回结果为准，Trae / Qoder 暂未接入成长任务。
-
-豆包账号可在「任务中心」查看豆包工作活动的每日签到、工作任务、领域选择、文档／表格／PPT、定时提醒及累计额度奖励。列表和奖励金额通过活动 V3 接口实时读取；支持单项签到、单项领奖及当前账号批量领取已达标奖励。工作类任务需在对应豆包账号内实际完成，面板提供官方推荐提示词和完成指引，回到页面可刷新进度。累计额度仅代表活动累计获得值，不是剩余额度；领奖前重新读取平台任务实例，领奖后核验已领取状态，并尝试刷新余额。未达标、未知状态、停用账号和重复领取均有门控；平台错误会如实展示。
 
 ### 任务覆盖与奖励
 
@@ -408,7 +407,7 @@ curl -s http://localhost:7863/v1/search/messages \
 | `pool.idle_weight_per_hour` | `0.5` | 闲置补偿：每小时未使用 +0.5 权重 |
 | `pool.idle_weight_max` | `5.0` | 闲置补偿权重封顶 |
 | `pool.strategy.domestic` | `single_account` | 国内版账号池调度：`single_account` / `weighted_random` / `round_robin` / `sequential_exhaust`，支持热更新 |
-| `gateway.supplier` | `auto` | 供应应用：`auto` / `workbuddy-cn` / `workbuddy-global` / `minimax` / `qoder` / `trae` / `antigravity` / `doubao`；网关页左上角选择后保存并热生效。固定应用时，面板与 `/v1/models` 仅列该应用模型；裸模型名交由该应用，其他应用的显式模型前缀返回 400，不回退。`auto` 保持按模型前缀路由，目录合并各应用。 |
+| `gateway.supplier` | `auto` | 供应应用：`auto` / `workbuddy-cn` / `workbuddy-global` / `minimax` / `qoder` / `trae` / `antigravity`；网关页左上角选择后保存并热生效。固定应用时，面板与 `/v1/models` 仅列该应用模型；裸模型名交由该应用，其他应用的显式模型前缀返回 400，不回退。`auto` 保持按模型前缀路由，目录合并各应用。 |
 | `pool.strategy.international` | `single_account` | 国际版账号池独立调度策略，同上；不改变既有地区路由 |
 | `pool.account_order.domestic` / `international` | `[]` | 对应地区的 UID 优先顺序；未列出账号按 UID 排序追加；只用于轮询和顺序耗尽 |
 | `pool.prefer_expiring` | `true` | 快过期积分加权：窗口内仍有有效快过期批次的账号，选号权重 ×3（虚拟实例）；不按到期时间排序、与批次金额无关；是软偏好，弱于会话粘性与模型成本分层（#101） |
@@ -758,6 +757,8 @@ baseURL 指向 `<网关>/v1/search`，即可零代码接入本网关的搜索能
 ### 账号平台与客户端切换
 
 **Qoder 国内版**：在「Qoder → 添加账号」中获取浏览器授权链接，用阿里云账号完成授权后自动保存；也支持 PAT / 访问令牌。可查询剩余积分、手动领取每日奖励、停用 / 启用和移除账号。浏览器授权凭证支持到期续期，单独保存在状态文件同目录的 `qoder-accounts.json`（默认 `data/`），含敏感凭证，请勿分享。
+
+2026-11-20 起，Qoder 不再向个人免费账号（用量接口返回的 `userType=personal_standard`）发放每日 100 Credits；面板会自动识别该类型并隐藏签到 / 领取入口，付费账号不受影响。
 
 Qoder 的[每日 100 Credits 活动](https://docs.qoder.cn/events/100credits)以北京时间 **10:00 至次日 10:00** 为一轮，奖励有效期 30 天，实际资格和活动是否继续由平台决定。与现有平台共用签到设置；早于 10 点的时刻对 Qoder 顺延至 10:00，同一时刻去重。仅从平台当前返回的有效日奖励中领取并回读确认，活动列表为空或结果不明确时会提示，不能视为已领取。
 
