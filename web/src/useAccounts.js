@@ -14,7 +14,8 @@ const ZONE = 'Asia/Shanghai';
 
 export function formatHour(hour) { return String(hour).padStart(2, '0') + ':00'; }
 export function formatNumber(value) { return Number(value || 0).toLocaleString('zh-CN'); }
-export function canCheckin(account) { return !account.disabled && !account.enterprise && account.realm !== 'global' && account.checkin_supported !== false; }
+export function providerSupportsCheckin(provider) { return !['qoder', 'doubao', 'antigravity'].includes(provider); }
+export function canCheckin(account) { return providerSupportsCheckin(account.provider) && !account.disabled && !account.enterprise && account.realm !== 'global' && account.checkin_supported !== false; }
 export function accountEdition(account) { return account.provider === 'doubao' ? '豆包' : account.provider === 'antigravity' ? 'Antigravity' : account.provider === 'minimax' ? 'MiniMax 国内版' : account.provider === 'qoder' ? 'Qoder 国内版' : account.provider === 'trae' ? 'Trae 国内版' : account.enterprise ? '企业版' : account.realm === 'global' ? '国际版' : '国内版'; }
 export function accountCredits(account) { return account.balance_known === false ? '--' : formatNumber(account.provider === 'doubao' ? account.available_credits ?? account.credits : account.credits); }
 export function planLabel(userType) {
@@ -30,12 +31,8 @@ export function planLabel(userType) {
   return userType;
 }
 export function checkinState(account) {
-  if (account.provider === 'qoder') {
-    if (account.disabled) return { text: '已暂停', kind: 'muted' };
-    if (account.checkin_supported === false) return { text: '不支持', kind: 'muted' };
-    return account.checkin_done ? { text: '本轮已领取', kind: 'success' } : { text: '本轮待领取', kind: 'warning' };
-  }
-  if (account.enterprise || account.realm === 'global' || account.checkin_supported === false) return { text: '不支持签到', kind: 'muted' };
+
+  if (!providerSupportsCheckin(account.provider) || account.enterprise || account.realm === 'global' || account.checkin_supported === false) return { text: '不支持签到', kind: 'muted' };
   if (account.checkin_done) return { text: '已签到', kind: 'success' };
   if (account.disabled) return { text: '已暂停', kind: 'muted' };
   return { text: '待签到', kind: 'warning' };
@@ -52,7 +49,7 @@ export function useAccounts() {
     : ({ trae: traeAccounts.value, qoder: qoderAccounts.value, minimax: minimaxAccounts.value, antigravity: antigravityAccounts.value, doubao: doubaoAccounts.value })[provider.value]);
   const logs = computed(() => allLogs.value.filter(e => provider.value === 'workbuddy' ? !/^(trae|qoder|minimax|antigravity|doubao):/.test(e.text) : e.text.startsWith(provider.value + ':')));
   const apiPrefix = value => ['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(value) ? value + '/' : '';
-  const effectiveHours = computed(() => [...new Set((schedule.value?.checkin_hours || []).map(h => provider.value === 'qoder' ? Math.max(10, h) : h))].sort((a, b) => a - b));
+  const effectiveHours = computed(() => [...new Set(schedule.value?.checkin_hours || [])].sort((a, b) => a - b));
   const schedule = ref(null), connected = ref(false), loading = ref(true), error = ref('');
   const desktopClients = ref([]), desktopJob = ref(null), desktopError = ref('');
   const pendingDesktopSwitch = ref(null);
@@ -195,9 +192,8 @@ export function useAccounts() {
       remaining: minutes >= 60 ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分` : `${minutes} 分钟`,
     };
   };
-  const nextRun = computed(() => provider.value === 'antigravity' ? null : nextRunFor(effectiveHours.value));
-  // 统一视图的下次签到：不按 Qoder 顺延，即所有平台中最早的可签到时刻。
-  const allNextRun = computed(() => nextRunFor([...new Set(schedule.value?.checkin_hours || [])].sort((a, b) => a - b)));
+  const allNextRun = computed(() => nextRunFor(effectiveHours.value));
+  const nextRun = computed(() => providerSupportsCheckin(provider.value) ? allNextRun.value : null);
   const expiryEntries = computed(() => accounts.value.flatMap(account =>
     (account.credits_expiry_buckets || []).map(bucket => ({ ...bucket, uid: account.uid, name: accountName(account) }))
   ).filter(b => Number(b.remain) > 0 && new Date(b.expires_at || b.date).getTime() > now.value)
@@ -294,6 +290,7 @@ export function useAccounts() {
   }
   watch([provider, connected], () => { refreshDoubaoBalances().catch(() => {}); });
   async function checkinAll() {
+    if (!providerSupportsCheckin(provider.value)) return;
     return action('checkin-all', async () => {
       await api(apiPrefix(provider.value) + 'checkin_all', { method: 'POST' });
       Message.success('签到已开始');

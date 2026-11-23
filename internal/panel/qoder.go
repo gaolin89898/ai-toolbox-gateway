@@ -42,7 +42,6 @@ func (p *Panel) qoderRoutes() {
 	p.mux.HandleFunc("POST /panel/api/qoder/login/cancel", p.withAuth(p.qoderLoginCancel))
 	p.mux.HandleFunc("POST /panel/api/qoder/accounts", p.withAuth(p.qoderAdd))
 	p.mux.HandleFunc("POST /panel/api/qoder/accounts/{uid}/{action}", p.withAuth(p.qoderAction))
-	p.mux.HandleFunc("POST /panel/api/qoder/checkin_all", p.withAuth(p.qoderCheckinAll))
 	p.mux.HandleFunc("POST /panel/api/qoder/balance_all", p.withAuth(p.qoderBalanceAll))
 }
 func (p *Panel) qoderAccounts() []qoder.Status {
@@ -95,7 +94,7 @@ func (p *Panel) qoderAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := r.PathValue("action")
-	if action != "checkin" && action != "balance" && action != "remove" && action != "disable" && action != "revive" {
+	if action != "balance" && action != "remove" && action != "disable" && action != "revive" {
 		http.NotFound(w, r)
 		return
 	}
@@ -112,18 +111,6 @@ func (p *Panel) qoderAction(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("qoder: %s 完成", action)
 	writeJSON(w, 200, map[string]any{"ok": true, "account": a, "checkin_done": a.CheckinDone, "balance_error": warning})
-}
-func (p *Panel) qoderCheckinAll(w http.ResponseWriter, r *http.Request) {
-	if !p.qoderReady(w) {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		p.cfg.Qoder.RunAll(ctx, "checkin")
-	}()
-	log.Printf("qoder: 手动领取每日奖励已开始")
-	writeJSON(w, 200, map[string]any{"ok": true, "started": true})
 }
 func (p *Panel) qoderBalanceAll(w http.ResponseWriter, r *http.Request) {
 	if !p.qoderReady(w) {

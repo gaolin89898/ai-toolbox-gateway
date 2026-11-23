@@ -355,7 +355,6 @@ func applySideRefresh(rt *appRuntime) {
 	refresh := rt.settings.schedule.RefreshAfterCheckin
 	rt.settings.mu.Unlock()
 	rt.trae.SetRefreshEnabled(refresh)
-	rt.qoder.SetRefreshEnabled(refresh)
 	rt.minimax.SetRefreshEnabled(refresh)
 }
 
@@ -366,7 +365,7 @@ func logSchedulerStatus(rt *appRuntime) {
 	if !s.Enabled {
 		log.Printf("签到已禁用（签到设置 checkin_enabled=false）")
 	} else {
-		log.Printf("签到已启用：%v 点（WorkBuddy + Trae + MiniMax 同批；Qoder 活动轮次独立排程）", s.Hours)
+		log.Printf("签到已启用：%v 点（WorkBuddy + Trae + MiniMax 同批）", s.Hours)
 	}
 	if !rt.gateway {
 		log.Printf("账号管理模式：/v1/* 转发、Redis 镜像、用量记录未启用（-gateway 开启网关）")
@@ -528,17 +527,10 @@ func startUnifiedWithListener(parent context.Context, configPath string, cfg *Co
 		// 启动即预热模型积分倍率表（网关转发需要；异步，失败仅记日志）。
 		go warmModelRates(ctx, rt.up, rt.p)
 	}
-	// Qoder 活动轮次排程（10:00 起按签到时点；两类模式都跑）。
-	go runQoderSchedule(ctx, rt.settings, rt.qoder)
 	// 启动补签：签到开启且 catchup_on_start 时立即补一轮（含旁路平台）。
 	if rt.settings.schedule.Enabled && rt.settings.schedule.CatchupOnStart {
 		go rt.sch.RunCheckinNow()
 		go rt.sch.RunCheckinHook()
-		go func() {
-			qctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-			defer cancel()
-			rt.qoder.RunAll(qctx, "checkin")
-		}()
 	}
 
 	srv := &http.Server{

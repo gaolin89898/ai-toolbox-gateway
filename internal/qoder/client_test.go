@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,11 +25,6 @@ func testClient(t *testing.T, handler http.HandlerFunc) *Client {
 	return c
 }
 func reply(w http.ResponseWriter, v any) { _ = json.NewEncoder(w).Encode(v) }
-func daily(id, state string) map[string]any {
-	now := time.Now()
-	return map[string]any{"campaignId": id, "claimStatus": state, "actionType": "CLAIM_BENEFIT", "startAt": now.Add(-time.Hour).Unix(), "endAt": now.Add(23 * time.Hour).Unix(), "benefit": map[string]any{"kind": "CREDITS", "amount": 100}}
-}
-
 func TestLoginPKCEAndPollIdentity(t *testing.T) {
 	l, err := NewLogin()
 	if err != nil {
@@ -86,90 +82,6 @@ func TestBalanceRejectsUnknownAndAddsQuotas(t *testing.T) {
 		err := c.balance(context.Background(), &a)
 		if (err == nil) != tc.valid || tc.valid && (!a.BalanceKnown || a.Credits != tc.want) {
 			t.Fatalf("%s: %+v, %v", tc.body, a, err)
-		}
-	}
-}
-
-func TestDailyClaimConfirmsAfterLostResponseWithoutRetry(t *testing.T) {
-	posts := 0
-	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			posts++
-			if r.ContentLength != 0 || r.URL.Path != "/sash/api/v1/me/campaigns/daily/claim" {
-				t.Error("invalid claim request")
-			}
-			w.WriteHeader(503)
-			return
-		}
-		state := "CLAIMABLE"
-		if posts > 0 {
-			state = "CLAIMED"
-		}
-		reply(w, map[string]any{"campaigns": []any{daily("daily", state)}})
-	})
-	a := Account{}
-	if err := c.checkin(context.Background(), &a, true); err != nil {
-		t.Fatal(err)
-	}
-	if posts != 1 || !status(a).CheckinDone {
-		t.Fatalf("posts=%d, done=%v", posts, status(a).CheckinDone)
-	}
-}
-
-func TestDailyCampaignEligibilityAndUnconfirmedResult(t *testing.T) {
-	for _, mode := range []string{"empty", "expired", "month-promo", "view", "unconfirmed", "already", "partial"} {
-		t.Run(mode, func(t *testing.T) {
-			posts := 0
-			c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == "POST" {
-					posts++
-					reply(w, map[string]any{"ok": true})
-					return
-				}
-				d := daily("daily", "CLAIMABLE")
-				list := []any{d}
-				switch mode {
-				case "empty":
-					list = []any{}
-				case "expired":
-					d["startAt"], d["endAt"] = time.Now().Add(-48*time.Hour).Unix(), time.Now().Add(-24*time.Hour).Unix()
-				case "month-promo":
-					d["endAt"] = time.Now().Add(30 * 24 * time.Hour).Unix()
-				case "view":
-					d["actionType"] = "VIEW_DETAILS"
-				case "already":
-					d["claimStatus"] = "CLAIMED"
-				case "partial":
-					d["claimStatus"] = "CLAIMED"
-					list = append(list, daily("locked", "LOCKED"))
-				}
-				reply(w, map[string]any{"campaigns": list})
-			})
-			a := Account{LastPeriod: RewardPeriod(time.Now()), ClaimedUntil: time.Now().Add(time.Hour)}
-			err := c.checkin(context.Background(), &a, true)
-			if (err == nil) != (mode == "already") || status(a).CheckinDone != (mode == "already") {
-				t.Fatalf("err=%v, done=%v", err, status(a).CheckinDone)
-			}
-			wantPosts := 0
-			if mode == "unconfirmed" {
-				wantPosts = 1
-			}
-			if posts != wantPosts {
-				t.Fatalf("posts=%d, want=%d", posts, wantPosts)
-			}
-		})
-	}
-}
-
-func TestRewardPeriodBoundary(t *testing.T) {
-	for _, tc := range []struct{ instant, period string }{
-		{"2026-11-01T01:59:59Z", "2026-10-31"},
-		{"2026-11-01T02:00:00Z", "2026-11-01"},
-		{"2026-11-01T23:00:00Z", "2026-11-01"},
-	} {
-		now, _ := time.Parse(time.RFC3339, tc.instant)
-		if RewardPeriod(now) != tc.period {
-			t.Fatalf("%s: %s", tc.instant, RewardPeriod(now))
 		}
 	}
 }
@@ -263,8 +175,6 @@ func TestStoreIdentityGuardRefreshRotationAndPublicStatus(t *testing.T) {
 				return
 			}
 			reply(w, map[string]any{"qoderUsage": map[string]any{"userQuota": map[string]any{"remaining": 200, "total": 300}}})
-		case "/sash/api/v1/me/campaigns":
-			reply(w, map[string]any{"campaigns": []any{daily("daily", "CLAIMED")}})
 		case "/api/v1/deviceToken/refresh":
 			reply(w, map[string]any{"device_token": "dt-rotated-secret", "refresh_token": "drt-rotated-secret", "expires_in": 3600})
 		default:
@@ -294,32 +204,13 @@ func TestStoreIdentityGuardRefreshRotationAndPublicStatus(t *testing.T) {
 	if strings.Contains(string(public), "secret") || strings.Contains(string(public), "token\"") || !strings.Contains(string(public), "HTTP 503") {
 		t.Fatalf("unsafe public status: %s", public)
 	}
-	_, _, _ = s.Action(context.Background(), a.UID, "disable")
 	if _, _, err = s.Action(context.Background(), a.UID, "checkin"); err == nil {
-		t.Fatal("disabled account claimed")
+		t.Fatal("retired check-in accepted for an enabled account")
 	}
 	_, _, _ = s.Action(context.Background(), a.UID, "remove")
 	reopened, _ = Open(path, c)
 	if len(reopened.List()) != 0 {
 		t.Fatal("remove did not persist")
-	}
-}
-
-func TestCheckinSupportedByUserType(t *testing.T) {
-	for _, tc := range []struct {
-		userType  string
-		supported bool
-	}{
-		{"personal_standard", false},
-		{"personal_free", false},
-		{"free", false},
-		{"personal_pro", true},
-		{"team", true},
-		{"", true},
-	} {
-		if got := CheckinSupported(tc.userType); got != tc.supported {
-			t.Fatalf("CheckinSupported(%q) = %v, want %v", tc.userType, got, tc.supported)
-		}
 	}
 }
 
@@ -331,19 +222,28 @@ func TestBalanceRecordsUserType(t *testing.T) {
 	if err := c.balance(context.Background(), &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.UserType != "personal_standard" || CheckinSupported(a.UserType) {
+	if a.UserType != "personal_standard" {
 		t.Fatalf("free plan not detected: %+v", a)
 	}
 }
 
-func TestFreePlanCheckinDoesNotContactUpstream(t *testing.T) {
-	calls := 0
-	c := testClient(t, func(w http.ResponseWriter, r *http.Request) { calls++ })
-	a := Account{AccountUID: "a", UserType: "personal_standard"}
-	if err := c.checkin(context.Background(), &a, true); err != nil || calls != 0 {
-		t.Fatalf("free plan checkin contacted upstream: calls=%d err=%v", calls, err)
+func TestOpenClearsOnlyRetiredCampaignErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounts.json")
+	if err := os.WriteFile(path, []byte(`[
+		{"id":"qoder-1","user_type":"personal_pro","last_period":"2026-11-23","claimed_until":"2026-11-24T02:00:00Z","last_error":"Qoder 当前没有可识别的每日积分活动，请在客户端查看活动资格"},
+		{"id":"qoder-2","last_error":"Qoder 登录凭证失效或无权访问，请重新授权"}
+	]`), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if a.LastPeriod != "" || !a.ClaimedUntil.IsZero() {
-		t.Fatalf("free plan checkin mutated state: %+v", a)
+	s, err := Open(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts := s.List()
+	if accounts[0].LastError != "" || accounts[0].CheckinSupported || accounts[0].CheckinDone {
+		t.Fatalf("retired campaign status was exposed: %+v", accounts[0])
+	}
+	if accounts[1].LastError != "Qoder 登录凭证失效或无权访问，请重新授权" {
+		t.Fatalf("credential error was cleared: %+v", accounts[1])
 	}
 }

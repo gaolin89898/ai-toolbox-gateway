@@ -16,7 +16,7 @@ const families = computed(() => {
   const d = draft.value;
   if (!d) return [];
   return [
-    { id: 'checkin', name: '每日签到', desc: 'WorkBuddy + Trae + MiniMax 同批；Qoder 活动轮次顺延至 10:00 起', platforms: ['WorkBuddy', 'Trae', 'MiniMax', 'Qoder'], plan: d.checkin_hours, enabled: d.checkin_enabled, statusKey: 'checkin', readonly: true },
+    { id: 'checkin', name: '每日签到', desc: 'WorkBuddy + Trae + MiniMax 同批', platforms: ['WorkBuddy', 'Trae', 'MiniMax'], plan: d.checkin_hours, enabled: d.checkin_enabled, statusKey: 'checkin', readonly: true },
     { id: 'travel', name: '旅行巡检', desc: '一趟派出 + 一趟领奖闭环', platforms: ['WorkBuddy'], plan: d.travel_hours, enabled: d.travel_enabled, key: 'travel', statusKey: 'travel' },
     { id: 'activity', name: '活跃上报', desc: '点亮连登 + 解锁领养前置', platforms: ['WorkBuddy'], plan: d.activity_hours, enabled: d.activity_enabled, key: 'activity', statusKey: 'activity' },
     { id: 'keepalive', name: 'Token 保活', desc: '刷新登录凭证，会话死亡自动禁用', platforms: ['WorkBuddy'], plan: d.keepalive_hours, enabled: d.keepalive_enabled, key: 'keepalive', statusKey: 'keepalive' },

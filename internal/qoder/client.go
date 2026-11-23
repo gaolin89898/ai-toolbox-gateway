@@ -1,5 +1,4 @@
-// Package qoder implements Qoder CN account authorization, usage and daily
-// credit campaigns. Wire formats reference smart-open/TraeWorkAssistant (MIT).
+// Package qoder implements Qoder CN account authorization and usage. Wire formats reference smart-open/TraeWorkAssistant (MIT).
 package qoder
 
 import (
@@ -16,7 +15,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,13 +23,6 @@ import (
 const apiBase = "https://openapi.qoder.com.cn"
 const webBase = "https://qoder.cn"
 const clientID = "732aef47-9cf2-46a2-95fe-4cebb5d0d1fa"
-
-var china = time.FixedZone("Asia/Shanghai", 8*3600)
-
-// RewardPeriod is the start of the 10:00-to-10:00 daily reward window.
-func RewardPeriod(now time.Time) string {
-	return now.In(china).Add(-10 * time.Hour).Format("2006-01-02")
-}
 
 type Client struct {
 	HTTP *http.Client
@@ -48,7 +39,7 @@ func (e *responseError) Error() string {
 	if e.code == 401 || e.code == 403 {
 		return "Qoder 登录凭证失效或无权访问，请重新授权"
 	}
-	return fmt.Sprintf("Qoder 请求未成功（HTTP %d），请稍后检查活动或网络", e.code)
+	return fmt.Sprintf("Qoder 请求未成功（HTTP %d），请稍后检查网络", e.code)
 }
 func (c *Client) request(ctx context.Context, method, path, token string, body any) (map[string]json.RawMessage, error) {
 	var input io.Reader
@@ -90,12 +81,12 @@ func (c *Client) request(ctx context.Context, method, path, token string, body a
 	}
 	// Never forward server errors: upstream messages may contain credential data.
 	if text(root, "errorCode", "error_code") != "" || string(root["success"]) == "false" {
-		return nil, fmt.Errorf("Qoder 业务请求未成功，请检查账号或活动资格")
+		return nil, fmt.Errorf("Qoder 业务请求未成功，请检查账号状态")
 	}
 	if raw, ok := root["code"]; ok {
 		code := strings.Trim(string(raw), `"`)
 		if code != "0" && code != "200" && code != "OK" && code != "SUCCESS" && code != "null" {
-			return nil, fmt.Errorf("Qoder 业务状态异常，请检查账号或活动资格")
+			return nil, fmt.Errorf("Qoder 业务状态异常，请检查账号状态")
 		}
 	}
 	if nested := object(root["data"]); nested != nil {
@@ -338,123 +329,5 @@ func (c *Client) balance(ctx context.Context, a *Account) error {
 		return fmt.Errorf("Qoder 用量响应未包含可识别的余额")
 	}
 	a.Credits, a.Total, a.BalanceKnown, a.BalanceUpdatedAt = remaining, total, true, time.Now()
-	return nil
-}
-
-type Campaign struct {
-	ID      string          `json:"campaignId"`
-	Name    string          `json:"name"`
-	Status  string          `json:"claimStatus"`
-	Action  string          `json:"actionType"`
-	Start   json.RawMessage `json:"startAt"`
-	End     json.RawMessage `json:"endAt"`
-	Benefit struct {
-		Kind   string  `json:"kind"`
-		Amount float64 `json:"amount"`
-	} `json:"benefit"`
-}
-
-func campaignTime(raw json.RawMessage) time.Time {
-	if n, ok := number(raw); ok {
-		if n > 1e12 {
-			return time.UnixMilli(int64(n))
-		}
-		if n > 1e9 {
-			return time.Unix(int64(n), 0)
-		}
-	}
-	var s string
-	_ = json.Unmarshal(raw, &s)
-	t, _ := time.Parse(time.RFC3339, s)
-	return t
-}
-func (a Campaign) active(now time.Time) bool {
-	start, end := campaignTime(a.Start), campaignTime(a.End)
-	return !start.IsZero() && !end.IsZero() && !now.Before(start) && now.Before(end)
-}
-func (a Campaign) credits() bool {
-	window := campaignTime(a.End).Sub(campaignTime(a.Start))
-	return strings.EqualFold(a.Action, "CLAIM_BENEFIT") && strings.EqualFold(a.Benefit.Kind, "CREDITS") && a.Benefit.Amount == 100 && window > 0 && window <= 25*time.Hour
-}
-
-var campaignID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
-
-func (c *Client) campaigns(ctx context.Context, a *Account) ([]Campaign, error) {
-	root, err := c.request(ctx, "GET", "/sash/api/v1/me/campaigns", a.Token, nil)
-	if err != nil {
-		return nil, err
-	}
-	var list []Campaign
-	if json.Unmarshal(root["campaigns"], &list) != nil || list == nil {
-		return nil, fmt.Errorf("Qoder 活动列表为空或格式变更，请在客户端查看活动")
-	}
-	return list, nil
-}
-func confirmedCampaign(list []Campaign, id string, now time.Time) bool {
-	for _, a := range list {
-		if a.ID == id && a.active(now) && a.credits() && strings.EqualFold(a.Status, "CLAIMED") {
-			return true
-		}
-	}
-	return false
-}
-func (c *Client) checkin(ctx context.Context, a *Account, claim bool) error {
-	if !CheckinSupported(a.UserType) {
-		return nil
-	}
-	list, err := c.campaigns(ctx, a)
-	if err != nil {
-		return err
-	}
-	a.LastPeriod, a.ClaimedUntil = "", time.Time{}
-	var active []Campaign
-	for _, item := range list {
-		if item.credits() && item.active(time.Now()) && campaignID.MatchString(item.ID) {
-			active = append(active, item)
-		}
-	}
-	if len(active) == 0 {
-		if claim {
-			return fmt.Errorf("Qoder 当前没有可识别的每日积分活动，请在客户端查看活动资格")
-		}
-		return nil
-	}
-	all := true
-	for _, item := range active {
-		if strings.EqualFold(item.Status, "CLAIMED") {
-			continue
-		}
-		if !claim || !strings.EqualFold(item.Status, "CLAIMABLE") {
-			all = false
-			continue
-		}
-		_, claimErr := c.request(ctx, "POST", "/sash/api/v1/me/campaigns/"+item.ID+"/claim", a.Token, nil)
-		// After any claim result, confirm by GET. Never retry a possibly
-		// successful POST, and never infer success from an empty response.
-		latest, verifyErr := c.campaigns(ctx, a)
-		if verifyErr != nil || !confirmedCampaign(latest, item.ID, time.Now()) {
-			if claimErr != nil {
-				return claimErr
-			}
-			return fmt.Errorf("Qoder 领取结果尚未确认，请刷新状态，勿连续领取")
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Second):
-		}
-	}
-	if all {
-		a.LastPeriod = RewardPeriod(time.Now())
-		end := campaignTime(active[0].End)
-		for _, item := range active {
-			if t := campaignTime(item.End); t.Before(end) {
-				end = t
-			}
-		}
-		a.ClaimedUntil = end
-	} else if claim {
-		return fmt.Errorf("Qoder 部分活动暂不可领取，请在客户端查看条件")
-	}
 	return nil
 }

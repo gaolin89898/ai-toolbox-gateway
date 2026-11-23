@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { Button as AButton, Tooltip as ATooltip } from '@arco-design/web-vue';
 import { IconUserGroup, IconCalendar, IconFile, IconSafe, IconMoon, IconSun, IconClockCircle, IconCheckSquare, IconGift, IconThunderbolt, IconBook, IconCalendarClock, IconCopy } from '@arco-design/web-vue/es/icon';
-import { formatHour } from '../useAccounts';
+import { formatHour, providerSupportsCheckin } from '../useAccounts';
 
 const props = defineProps({ model: Object, view: String, dark: Boolean, hostTheme: Boolean });
 const emit = defineEmits(['navigate', 'key', 'theme']);
@@ -38,7 +38,7 @@ function copyKey() {
         <div class="inline-between api-key-row"><small>Bearer 管理密钥</small><button class="api-copy" :disabled="!apiKey" aria-label="复制密钥" title="复制密钥" @click="copyKey"><icon-copy /></button></div>
         <small class="side-muted">与面板共用 api_key · 鉴权失败返回 401</small>
       </section>
-      <div v-if="!['antigravity', 'doubao'].includes(model.provider)" class="sidebar-schedule">
+      <div v-if="providerSupportsCheckin(model.provider)" class="sidebar-schedule">
         <div class="inline-between"><span>自动签到</span><span class="side-badge">{{ model.schedule?.checkin_enabled ? '已开启' : '已关闭' }}</span></div>
         <div class="side-times"><template v-for="(hour, index) in model.effectiveHours" :key="hour"><span v-if="index" class="time-separator">·</span><b>{{ formatHour(hour) }}</b></template><span v-if="!model.schedule">--:--</span></div>
         <span class="side-muted">每天 · 北京时间</span>

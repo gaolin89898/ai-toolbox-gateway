@@ -40,7 +40,7 @@ async function switchClient() {
   try { await model.switchDesktop(switchAccount.value); switchAccount.value = null; } catch { /* Preserve the confirmation for retry. */ }
 }
 const tabs = computed(() => [...[{ id: 'accounts', name: '账号', icon: IconUserGroup }, { id: 'tasks', name: '任务', icon: IconCheckSquare }, { id: 'billing', name: '明细', icon: IconBook }, { id: 'rewards', name: '奖励', icon: IconGift }, { id: 'settings', name: '签到', icon: IconCalendar }, { id: 'schedules', name: '定时', icon: IconCalendarClock }, { id: 'logs', name: '日志', icon: IconFile }].filter(tab => !(model.provider === 'doubao' && tab.id === 'tasks')), ...(model.capabilities?.gateway ? [{ id: 'gateway', name: '网关', icon: IconThunderbolt }] : [])]);
-const benefitPlatforms = computed(() => view.value === 'tasks' ? ['workbuddy-cn'] : ['workbuddy-cn', 'qoder']);
+const benefitPlatforms = ['workbuddy-cn'];
 function navigate(value) { view.value = value; location.hash = value; }
 watch(view, () => workspaceScrollbar.value?.scrollTo({ top: 0 }), { flush: 'post' });
 function hashChanged() { view.value = readView(); }
@@ -53,7 +53,7 @@ watch(dark, value => {
 }, { immediate: true, flush: 'sync' });
 onBeforeUnmount(followHostTheme(value => { hostTheme.value = true; dark.value = value; }));
 watch(view, value => {
-  if (['tasks', 'rewards'].includes(value) && !benefitPlatforms.value.includes(model.platformSelection)) model.selectProvider('workbuddy-cn');
+  if (['tasks', 'rewards'].includes(value) && !benefitPlatforms.includes(model.platformSelection)) model.selectProvider('workbuddy-cn');
   document.title = `${{ accounts: '账号管理', tasks: '任务中心', billing: '积分明细', rewards: '活动奖励', settings: '签到设置', schedules: '定时任务', logs: '运行日志', gateway: '网关' }[value]} · AI 工具箱`;
 }, { immediate: true });
 async function openKey() {

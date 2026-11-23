@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/linguo2625469/workbuddy2api-panel/internal/pool"
+	"github.com/linguo2625469/workbuddy2api-panel/internal/qoder"
 )
 
 func TestRetiredDoubaoTaskAndCheckinEndpoints(t *testing.T) {
@@ -24,6 +26,24 @@ func TestRetiredDoubaoTaskAndCheckinEndpoints(t *testing.T) {
 		p.ServeHTTP(w, r)
 		if w.Code != http.StatusNotFound {
 			t.Errorf("retired endpoint %s %s returned %d", tc.method, tc.path, w.Code)
+		}
+	}
+}
+
+func TestRetiredQoderCheckinEndpoints(t *testing.T) {
+	store, err := qoder.Open(filepath.Join(t.TempDir(), "accounts.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := New(Config{AccountsOnly: true, APIKey: "test-key", Qoder: store})
+	defer p.Close()
+	for _, path := range []string{"checkin_all", "accounts/qoder-1/checkin"} {
+		r := httptest.NewRequest(http.MethodPost, "/panel/api/qoder/"+path, nil)
+		r.Header.Set("Authorization", "Bearer test-key")
+		w := httptest.NewRecorder()
+		p.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("retired Qoder endpoint %s returned %d", path, w.Code)
 		}
 	}
 }

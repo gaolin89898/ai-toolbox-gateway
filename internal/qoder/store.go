@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -31,8 +30,6 @@ type Account struct {
 	Total            float64   `json:"credits_total"`
 	BalanceKnown     bool      `json:"balance_known"`
 	BalanceUpdatedAt time.Time `json:"balance_updated_at"`
-	LastPeriod       string    `json:"last_period"`
-	ClaimedUntil     time.Time `json:"claimed_until"`
 	LastError        string    `json:"last_error,omitempty"`
 }
 type Status struct {
@@ -56,31 +53,23 @@ type Status struct {
 }
 
 func status(a Account) Status {
-	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "qoder", Realm: "cn", Disabled: a.Disabled, Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, UserType: a.UserType, CheckinSupported: CheckinSupported(a.UserType), CheckinDone: a.LastPeriod == RewardPeriod(time.Now()) && a.ClaimedUntil.After(time.Now()), TokenExpiresAt: a.ExpiresAt, HasRefresh: a.RefreshToken != "" || a.PAT != "", DesktopSupported: strings.HasPrefix(a.Token, "dt-") && strings.HasPrefix(a.RefreshToken, "drt-"), LastError: a.LastError}
-}
-
-// CheckinSupported reports whether the account's Qoder plan can claim the daily
-// 100-credit reward. Qoder stopped granting it to free personal plans in late
-// 2026: those accounts report userType personal_standard / personal_free.
-func CheckinSupported(userType string) bool {
-	t := strings.ToLower(strings.TrimSpace(userType))
-	if t == "" {
-		return true // Unknown plan keeps the legacy behaviour instead of hiding check-in.
+	return Status{
+		UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "qoder", Realm: "cn",
+		Disabled: a.Disabled, Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown,
+		BalanceUpdatedAt: a.BalanceUpdatedAt, UserType: a.UserType, TokenExpiresAt: a.ExpiresAt,
+		HasRefresh:       a.RefreshToken != "" || a.PAT != "",
+		DesktopSupported: strings.HasPrefix(a.Token, "dt-") && strings.HasPrefix(a.RefreshToken, "drt-"),
+		LastError:        a.LastError,
 	}
-	if strings.Contains(t, "free") || strings.Contains(t, "standard") {
-		return false
-	}
-	return true
 }
 
 type Store struct {
-	mu             sync.RWMutex
-	op             sync.Mutex
-	path           string
-	accounts       []Account
-	client         *Client
-	desktopSource  func() *Account
-	refreshEnabled atomic.Bool
+	mu            sync.RWMutex
+	op            sync.Mutex
+	path          string
+	accounts      []Account
+	client        *Client
+	desktopSource func() *Account
 }
 
 func Open(path string, c *Client) (*Store, error) {
@@ -88,7 +77,6 @@ func Open(path string, c *Client) (*Store, error) {
 		c = NewClient()
 	}
 	s := &Store{path: path, client: c, accounts: []Account{}}
-	s.refreshEnabled.Store(true)
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -96,9 +84,17 @@ func Open(path string, c *Client) (*Store, error) {
 	if err != nil || json.Unmarshal(raw, &s.accounts) != nil {
 		return nil, fmt.Errorf("读取 Qoder 账号存档失败")
 	}
+	for i := range s.accounts {
+		switch s.accounts[i].LastError {
+		case "Qoder 活动列表为空或格式变更，请在客户端查看活动",
+			"Qoder 当前没有可识别的每日积分活动，请在客户端查看活动资格",
+			"Qoder 领取结果尚未确认，请刷新状态，勿连续领取",
+			"Qoder 部分活动暂不可领取，请在客户端查看条件":
+			s.accounts[i].LastError = ""
+		}
+	}
 	return s, nil
 }
-func (s *Store) SetRefreshEnabled(v bool) { s.refreshEnabled.Store(v) }
 func (s *Store) List() []Status {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -217,14 +213,10 @@ func (s *Store) Add(ctx context.Context, a Account, expected string) (Status, []
 			a.Disabled = old.Disabled
 			a.Credits, a.Total, a.BalanceKnown = old.Credits, old.Total, old.BalanceKnown
 			a.BalanceUpdatedAt = old.BalanceUpdatedAt
-			a.LastPeriod, a.ClaimedUntil = old.LastPeriod, old.ClaimedUntil
 		}
 	}
 	warnings := []string{}
 	if err := s.client.balance(ctx, &a); err != nil {
-		warnings = append(warnings, err.Error())
-	}
-	if err := s.client.checkin(ctx, &a, false); err != nil {
 		warnings = append(warnings, err.Error())
 	}
 	if index < 0 {
@@ -278,31 +270,12 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, string, 
 		case "revive":
 			a.Disabled = false
 			a.LastError = ""
-		case "checkin", "balance":
-			if action == "checkin" && !CheckinSupported(a.UserType) {
-				return status(*a), "", nil
-			}
-			if action == "checkin" && a.Disabled {
-				return status(*a), "", fmt.Errorf("该 Qoder 账号已停用")
-			}
+		case "balance":
 			err = s.fresh(ctx, accounts, i)
-			if err == nil && action == "balance" {
+			if err == nil {
 				err = s.client.balance(ctx, a)
 				if err == nil {
 					if e := s.client.identify(ctx, a); e != nil {
-						warning = e.Error()
-					}
-					if e := s.client.checkin(ctx, a, false); e != nil {
-						warning = e.Error()
-					}
-				}
-			}
-			if err == nil && action == "checkin" {
-				if !status(*a).CheckinDone {
-					err = s.client.checkin(ctx, a, true)
-				}
-				if err == nil && s.refreshEnabled.Load() {
-					if e := s.client.balance(ctx, a); e != nil {
 						warning = e.Error()
 					}
 				}
@@ -327,7 +300,7 @@ func (s *Store) RunAll(ctx context.Context, action string) []string {
 		if ctx.Err() != nil {
 			break
 		}
-		if a.Disabled || action == "checkin" && (a.CheckinDone || !CheckinSupported(a.UserType)) {
+		if a.Disabled {
 			continue
 		}
 		_, _, err := s.Action(ctx, a.UID, action)

@@ -26,7 +26,7 @@
 
 ## 项目简介
 
-WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **WorkBuddy / Trae / Qoder / MiniMax / Antigravity / 豆包** 六个平台的账号（Antigravity 与豆包不做签到；豆包展示订阅与额度），支持本机 Windows 客户端账号切换、WorkBuddy 成长任务与活动奖励。页面可通过浏览器、Windows 桌面窗口或 DSH 插件使用，账号和设置由 Go 后端持久保存。
+WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **WorkBuddy / Trae / Qoder / MiniMax / Antigravity / 豆包** 六个平台的账号（Qoder、Antigravity 与豆包不做签到；豆包展示订阅与额度），支持本机 Windows 客户端账号切换、WorkBuddy 成长任务与活动奖励。页面可通过浏览器、Windows 桌面窗口或 DSH 插件使用，账号和设置由 Go 后端持久保存。
 
 直接运行程序进入账号管理模式；需要为个人工具提供 OpenAI 兼容接口时，使用同一程序加上 `-gateway`。
 
@@ -82,7 +82,7 @@ Google 请求优先遵循 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 环境配置
 | 能力 | 说明 |
 |---|---|
 | 多平台账号 | WorkBuddy 浏览器授权与 Cockpit JSON 导入；Trae 国内版直接登录、凭证及备份导入；Qoder 国内版浏览器授权或 PAT；MiniMax 国内版粘贴 Cookie / 令牌；Antigravity 与豆包直接网页授权，无需填写 OAuth 凭证 |
-| 积分与每日签到 | 单号 / 全部签到、余额刷新、停用 / 启用、备注；每日 09:00 / 21:00 默认时刻可修改，Qoder 按 10:00 活动轮次处理；免费版账号不再参与每日领取 |
+| 积分与每日签到 | 单号 / 全部签到、余额刷新、停用 / 启用、备注；每日 09:00 / 21:00 默认时刻可修改，签到范围为 WorkBuddy 国内版、Trae 和 MiniMax |
 | 本机客户端切换 | Windows WorkBuddy / WorkBuddy AI、Trae CN、Qoder CN；登录态备份、重启后身份核验和失败回滚，支持自定义安装目录和 Qoder 更新目录 |
 | 成长任务与活动奖励 | WorkBuddy 国内版个人账号扫描待办、执行全部待办、查看队列、领取奖励 |
 | 状态持久化 | 凭证、账号状态、备注和签到设置保存在本地；网关模式额外支持用量归档及可选 Upstash Redis 镜像 |
@@ -182,7 +182,7 @@ WorkBuddy 国内版个人账号可在「任务中心」扫描待办、执行单�
 
 ### 活动奖励
 
-默认账号管理模式在「活动奖励」展示 WorkBuddy 官方补偿、连登兑换、抽奖机会及券码。进入页面只查询状态，领取、兑换和抽奖需手动操作；Qoder 每日奖励使用当前有效活动接口，领取后回读确认。Trae 暂未接入额外活动奖励。
+默认账号管理模式在「活动奖励」展示 WorkBuddy 官方补偿、连登兑换、抽奖机会及券码。进入页面只查询状态，领取、兑换和抽奖需手动操作。Trae 暂未接入额外活动奖励。
 
 网关模式可在签到排程末尾执行连登兑换与抽奖，见[定时任务](#定时任务)。该行为不适用于默认账号管理模式。
 
@@ -748,7 +748,7 @@ baseURL 指向 `<网关>/v1/search`，即可零代码接入本网关的搜索能
 |---|---|
 | 账号 | 切换 WorkBuddy / Trae / Qoder 平台，添加 / 导入账号，查看余额、修改备注、停用 / 启用、签到和切换本机客户端 |
 | 任务中心 | WorkBuddy 国内版个人成长任务、扫描全部待办、单项 / 全部执行、领奖、队列进度与结果 |
-| 活动奖励 | WorkBuddy 官方补偿、连登兑换、抽奖及券码；Qoder 本轮每日奖励 |
+| 活动奖励 | WorkBuddy 官方补偿、连登兑换、抽奖及券码 |
 | 签到设置 | 自动签到、时刻、签到后刷新积分、启动补签和最近 7 天记录；DSH 内含管理密钥入口 |
 | 运行日志 | 查看后端连接与操作结果 |
 
@@ -756,15 +756,11 @@ baseURL 指向 `<网关>/v1/search`，即可零代码接入本网关的搜索能
 
 ### 账号平台与客户端切换
 
-**Qoder 国内版**：在「Qoder → 添加账号」中获取浏览器授权链接，用阿里云账号完成授权后自动保存；也支持 PAT / 访问令牌。可查询剩余积分、手动领取每日奖励、停用 / 启用和移除账号。浏览器授权凭证支持到期续期，单独保存在状态文件同目录的 `qoder-accounts.json`（默认 `data/`），含敏感凭证，请勿分享。
-
-2026-11-20 起，Qoder 不再向个人免费账号（用量接口返回的 `userType=personal_standard`）发放每日 100 Credits；面板会自动识别该类型并隐藏签到 / 领取入口，付费账号不受影响。
-
-Qoder 的[每日 100 Credits 活动](https://docs.qoder.cn/events/100credits)以北京时间 **10:00 至次日 10:00** 为一轮，奖励有效期 30 天，实际资格和活动是否继续由平台决定。与现有平台共用签到设置；早于 10 点的时刻对 Qoder 顺延至 10:00，同一时刻去重。仅从平台当前返回的有效日奖励中领取并回读确认，活动列表为空或结果不明确时会提示，不能视为已领取。
+**Qoder 国内版**：在「Qoder → 添加账号」中获取浏览器授权链接，用阿里云账号完成授权后自动保存；也支持 PAT / 访问令牌。可查询剩余积分、停用 / 启用和移除账号。浏览器授权凭证支持到期续期，单独保存在状态文件同目录的 `qoder-accounts.json`（默认 `data/`），含敏感凭证，请勿分享。
 
 Qoder 独立客户端（Windows `Qoder CN.exe`）已使用同一套「切换账号」按钮、确认窗口、任务进度和失败回滚。客户端至少启动并登录过一次以建立本机加密环境，之后面板内通过浏览器授权的账号可直接切换，不需要逐号保存快照。仅替换原生加密登录凭证并清除旧账号覆盖层，不改写本机设备码、项目、聊天数据库或浏览器数据。备份保存在 `data/desktop/backups/`。重启后检查新客户端会话中的账号请求结果及登录文件身份，无法核验时恢复原登录态。Qoder IDE 的 SQLite 登录格式暂未接入。
 
-Qoder OAuth、用量和活动接口参考 [TraeWorkAssistant](https://github.com/smart-open/TraeWorkAssistant) 的 `5113265866b8c6845cd651ee3ccee59b65debcbe` 版本，由本项目独立实现 Go 客户端；不执行其设备修改或历史活动 ID 兜底逻辑。
+Qoder OAuth 和用量接口参考 [TraeWorkAssistant](https://github.com/smart-open/TraeWorkAssistant) 的 `5113265866b8c6845cd651ee3ccee59b65debcbe` 版本，由本项目独立实现 Go 客户端；不执行其设备修改或历史活动 ID 兜底逻辑。
 
 面板现支持 **WorkBuddy / Trae / Qoder** 三个平台，在页面顶部切换。Trae 国内版可在「添加账号 → Trae → 直接登录」打开独立的 Edge / Chrome 窗口，在官网完成登录后自动添加账号，无需手动复制 Token。直接登录须在运行面板的电脑上使用 `http://localhost:7863/panel/` 或 `http://127.0.0.1:7863/panel/` 访问，并已安装桌面版 Edge / Chrome；Linux 还需桌面显示环境。每次登录使用独立临时浏览器资料，登录完成、取消或 15 分钟超时后关闭并清理。远程部署可使用「登录凭证」粘贴 Session Cookie / Token，或者导入 TraeTools 账号备份（支持带口令的 AES-GCM 加密备份及原始 Accounts 配置 JSON）。Session 可用于自动续期 Token；会话本身过期后需重新登录。设备号支持 12 至 20 位数字 `x-device-id`，新账号留空时会分配并持久保存。
 
@@ -788,7 +784,7 @@ Trae CN 与 Qoder CN 的运行状态按客户端实际进程路径核对，兼�
 - 「签到设置」的开关开启为蓝底“开”、圆点在右，关闭为灰底“关”、圆点在左。点击「保存设置」后立即生效，保存在 `data/account-settings.json`（跟随 `state_file` 目录），重启后保留。
 - 自动调度仅执行签到和积分查询，签到前按需刷新登录凭证；旅行、活跃上报、成长任务和抽奖不会自动运行。
 - 「任务中心」支持扫描全部待办、接受任务、单项执行、执行全部待办和领取奖励，可查看执行队列及进度。执行可能发起模型请求并消耗积分，需要页面确认。任务与个人活动奖励仅支持 WorkBuddy 国内版个人身份，企业账号和国际版会显示原因。
-- 「活动奖励」展示连登兑换、官方补偿、抽奖机会和券码；进入页面只查询状态，领取、兑换和抽奖需手动操作。Qoder 每日奖励沿用现有领取接口。
+- 「活动奖励」展示连登兑换、官方补偿、抽奖机会和券码；进入页面只查询状态，领取、兑换和抽奖需手动操作。
 - 国际版和企业版账号可管理、查询额度，但不支持个人每日签到。停用账号不参与自动签到。
 - 默认模式不提供 `/v1/*` API，也不初始化网关用量统计、会话路由或 Redis。Docker 使用同一默认模式，健康检查无需先添加账号。
 
@@ -850,7 +846,7 @@ Trae CN 与 Qoder CN 的运行状态按客户端实际进程路径核对，兼�
 | 成长任务 | `GET accounts/{uid}/tasks`；`POST accounts/{uid}/tasks/accept` · `claim` · `auto`；`POST tasks/scan_all` · `tasks/run_queue`；`GET tasks/queue` |
 | 活动奖励 | `GET/POST benefits/accounts/{uid}/rewards`，仅支持 WorkBuddy 国内版个人账号 |
 | Trae | `GET trae/login/available`；`POST trae/login/start` · `trae/login/cancel`；`GET trae/login/poll`；`POST trae/accounts` · `trae/import` · `trae/accounts/{uid}/{action}` · `trae/checkin_all` · `trae/balance_all`；账号状态包含在 `overview` |
-| Qoder | `POST qoder/login/start` · `qoder/login/cancel`；`GET qoder/login/poll`；`POST qoder/accounts` · `qoder/accounts/{uid}/{action}` · `qoder/checkin_all` · `qoder/balance_all`；账号状态包含在 `overview` |
+| Qoder | `POST qoder/login/start` · `qoder/login/cancel`；`GET qoder/login/poll`；`POST qoder/accounts` · `qoder/accounts/{uid}/{action}` · `qoder/balance_all`；账号状态包含在 `overview` |
 | 本机客户端 | `GET desktop/status`；`POST desktop/capture` · `desktop/switch`，必须为本机访问 |
 
 网关模式另外提供下列管理接口：
