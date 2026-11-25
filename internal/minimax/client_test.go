@@ -302,7 +302,7 @@ func TestRealResponseShapes(t *testing.T) {
 			reply(w, map[string]any{
 				"data": map[string]any{"userInfo": map[string]any{
 					"name": "MiniMax284053", "userID": "kpP3Mg67LZxa", "realUserID": "504290628402294785",
-					"subUserName": "林九序", "phone": "masked",
+					"subUserName": "林九序", "phone": "masked", "avatarUrl": "https://cdn.minimax.example/avatar.png",
 				}},
 				"statusInfo": map[string]any{"code": 0, "message": "成功"},
 			})
@@ -322,13 +322,14 @@ func TestRealResponseShapes(t *testing.T) {
 	if err := c.identify(context.Background(), &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.AccountUID != "504290628402294785" || a.Nickname != "MiniMax284053" {
+	if a.AccountUID != "504290628402294785" || a.Nickname != "MiniMax284053" || a.AvatarURL != "https://cdn.minimax.example/avatar.png" {
 		t.Fatalf("identify: %+v", a)
 	}
 }
 
 func TestStoreOAuthAddRefreshAndCheckin(t *testing.T) {
 	claims := 0
+	profileCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/minimax-cloud/api/v1/signin/status":
@@ -341,8 +342,9 @@ func TestStoreOAuthAddRefreshAndCheckin(t *testing.T) {
 			claims++
 			reply(w, map[string]any{"base_resp": map[string]any{"status_code": 0}, "data": map[string]any{"claim_id": "c1", "claim_result": 1, "day_no": 3, "points": 100, "expire_at_ms": 1795000000000}})
 		case r.Method == "GET" && r.URL.Path == "/v1/api/user/info":
+			profileCalls++
 			reply(w, map[string]any{
-				"data":       map[string]any{"userInfo": map[string]any{"name": "阿明", "realUserID": "user-a"}},
+				"data":       map[string]any{"userInfo": map[string]any{"name": "阿明", "realUserID": "user-a", "avatar_url": "https://cdn.minimax.example/ami.png"}},
 				"statusInfo": map[string]any{"code": 0},
 			})
 		case r.Method == "GET" && r.URL.Path == "/minimax-cloud/api/v1/credit/details":
@@ -370,8 +372,26 @@ func TestStoreOAuthAddRefreshAndCheckin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.AccountUID != "user-a" || !a.HasRefresh {
+	if a.AccountUID != "user-a" || a.Nickname != "阿明" || a.AvatarURL != "https://cdn.minimax.example/ami.png" || !a.HasRefresh {
 		t.Fatalf("add: %+v warnings=%v", a, warnings)
+	}
+	oldAccounts := s.snapshot()
+	oldAccounts[0].AvatarURL = ""
+	oldAccounts[0].ProfileCheckedAt = time.Time{}
+	if err := s.commit(oldAccounts); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Action(context.Background(), a.UID, "balance"); err != nil {
+		t.Fatal(err)
+	}
+	if updated := s.List()[0]; updated.Nickname != "阿明" || updated.AvatarURL != "https://cdn.minimax.example/ami.png" || profileCalls != 2 {
+		t.Fatalf("balance refresh did not backfill profile: %+v profile requests=%d", updated, profileCalls)
+	}
+	if _, _, err := s.Action(context.Background(), a.UID, "balance"); err != nil {
+		t.Fatal(err)
+	}
+	if profileCalls != 2 {
+		t.Fatalf("profile lookup repeated within 24 hours: %d requests", profileCalls)
 	}
 	if !strings.HasPrefix(a.UID, "minimax-") || len(s.List()) != 1 {
 		t.Fatalf("uid: %+v", a)

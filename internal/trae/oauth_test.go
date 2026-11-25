@@ -269,8 +269,7 @@ func TestOAuthStorePreservesBindingAndReauthorizationChecksTarget(t *testing.T) 
 		}
 		switch r.URL.Path {
 		case "/cloudide/api/v3/trae/GetUserInfo":
-			t.Fatal("native OAuth attempted to use web profile authentication")
-			return oauthResponse(r, 401, `{}`), nil
+			return oauthResponse(r, 200, `{"Result":{"UserID":"stored-user","ScreenName":"OAuth 名称"}}`), nil
 		case "/trae/api/v2/ug/checkin_credits/status":
 			if profileOnly {
 				t.Fatal("wrong reauthorization queried another account")
@@ -293,6 +292,9 @@ func TestOAuthStorePreservesBindingAndReauthorizationChecksTarget(t *testing.T) 
 	first, _, err := s.Add(context.Background(), a)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if first.Nickname != "OAuth 名称" {
+		t.Fatalf("OAuth account did not adopt the fetched screen name: %q", first.Nickname)
 	}
 	s.localDevices = func() []clientDevice { t.Fatal("OAuth account inspected local client device"); return nil }
 	checked = true
@@ -330,5 +332,42 @@ func TestOAuthStorePreservesBindingAndReauthorizationChecksTarget(t *testing.T) 
 	after, _ := os.ReadFile(path)
 	if string(before) != string(after) {
 		t.Fatal("rejected reauthorization modified stored credentials")
+	}
+}
+
+func TestOAuthIdentifyFetchesScreenNameAndFallsBack(t *testing.T) {
+	profileCode, profileBody := 200, ""
+	c := NewClient()
+	c.HTTP.Transport = oauthTransport(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/cloudide/api/v3/trae/GetUserInfo":
+			if r.URL.Host != "api.trae.com.cn" || r.Header.Get("Authorization") == "" {
+				t.Fatal("profile lookup left the OAuth API host or dropped the token")
+			}
+			return oauthResponse(r, profileCode, profileBody), nil
+		case "/trae/api/v2/ug/checkin_credits/status":
+			return oauthResponse(r, 200, `{"code":0,"enable":true,"checked_in":false}`), nil
+		case "/trae/api/v2/pay/user_current_entitlement_list":
+			return oauthResponse(r, 200, `{"is_credits_billing":true,"usage_summary":{"total_amount":100,"consumed_amount":0}}`), nil
+		default:
+			t.Fatal("unexpected endpoint during OAuth identify, including token refresh")
+			return nil, nil
+		}
+	})
+	s, err := Open(filepath.Join(t.TempDir(), "accounts.json"), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profileBody = `{"Result":{"UserID":"named-user","ScreenName":"网页昵称","AvatarUrl":"https://lf3-static.trae.com.cn/avatar.png"}}`
+	named, _, err := s.Add(context.Background(), testOAuthAccount(t, "named-user"))
+	if err != nil || named.Nickname != "网页昵称" || named.AvatarURL != "https://lf3-static.trae.com.cn/avatar.png" {
+		t.Fatalf("OAuth account profile was not adopted: %v %+v", err, named)
+	}
+
+	profileCode, profileBody = 401, `{}`
+	fallback, _, err := s.Add(context.Background(), testOAuthAccount(t, "quiet-user"))
+	if err != nil || fallback.Nickname != fallbackNickname {
+		t.Fatalf("failed profile lookup must keep the fallback name: %v %q", err, fallback.Nickname)
 	}
 }

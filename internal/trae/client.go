@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -215,10 +216,14 @@ func (c *Client) request(ctx context.Context, path string, a *Account) (map[stri
 	return data, err
 }
 
+// fallbackNickname labels accounts whose real screen name is not known yet.
+const fallbackNickname = "Trae 账号"
+
 func (c *Client) identify(ctx context.Context, a *Account) error {
 	if a.OAuth != nil {
-		// Native OAuth JWTs are accepted by billing, while the web CloudIDE
-		// profile endpoint can require a separate browser session cookie.
+		// Native OAuth JWTs are accepted by billing and, routed through the
+		// OAuth API host below, also by the profile endpoint. OAuth accounts
+		// carry no browser session, so the screen name lookup stays best-effort.
 		if err := c.authorize(ctx, a); err != nil {
 			return err
 		}
@@ -230,8 +235,9 @@ func (c *Client) identify(ctx context.Context, a *Account) error {
 		if _, _, err := c.status(ctx, a); err != nil {
 			return err
 		}
+		c.fetchProfile(ctx, a)
 		if a.Nickname == "" {
-			a.Nickname = "Trae 账号"
+			a.Nickname = fallbackNickname
 		}
 		return nil
 	}
@@ -255,10 +261,58 @@ func (c *Client) identify(ctx context.Context, a *Account) error {
 		return oauthError("Trae OAuth 账号验证不一致，已取消保存")
 	}
 	a.AccountUID = uid
-	if name := str(profile["ScreenName"]); name != "" {
-		a.Nickname = name
-	}
+	applyProfile(a, profile)
 	return nil
+}
+
+// fetchProfile best-effort resolves the account screen name. OAuth accounts
+// carry no browser session, so failures keep the current nickname and never
+// affect login state; posting directly instead of via request also avoids
+// rotating the OAuth refresh token just to fetch a display name.
+func (c *Client) fetchProfile(ctx context.Context, a *Account) {
+	data, err := c.post(ctx, "/cloudide/api/v3/trae/GetUserInfo", *a, false)
+	if ctx.Err() == nil {
+		a.ProfileCheckedAt = time.Now()
+	}
+	if err != nil {
+		return
+	}
+	profile := object(data["Result"])
+	if uid := str(profile["UserID"]); uid != "" && uid != a.AccountUID {
+		return
+	}
+	applyProfile(a, profile)
+}
+
+func applyProfile(a *Account, profile map[string]json.RawMessage) {
+	if a.Nickname == "" || a.Nickname == fallbackNickname {
+		if name := str(profile["ScreenName"]); name != "" {
+			a.Nickname = name
+		}
+	}
+	avatar := str(profile["AvatarUrl"])
+	if avatar == "" {
+		avatar = str(profile["AvatarURL"])
+	}
+	if avatar == "" {
+		avatar = str(profile["avatar_url"])
+	}
+	if avatarURL := validAvatarURL(avatar); avatarURL != "" {
+		a.AvatarURL = avatarURL
+	}
+	a.ProfileCheckedAt = time.Now()
+}
+
+func validAvatarURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) > 2048 {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil {
+		return ""
+	}
+	return parsed.String()
 }
 
 func (c *Client) status(ctx context.Context, a *Account) (bool, bool, error) {

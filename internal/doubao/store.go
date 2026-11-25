@@ -19,6 +19,7 @@ type Account struct {
 	ID                string    `json:"id"`
 	AccountUID        string    `json:"account_uid"`
 	Nickname          string    `json:"nickname"`
+	AvatarURL         string    `json:"avatar_url,omitempty"`
 	Cookie            string    `json:"cookie"`
 	DeviceID          string    `json:"device_id,omitempty"`
 	WebID             string    `json:"web_id,omitempty"`
@@ -43,6 +44,7 @@ type Status struct {
 	UID               string    `json:"uid"`
 	AccountUID        string    `json:"account_uid"`
 	Nickname          string    `json:"nickname"`
+	AvatarURL         string    `json:"avatar_url,omitempty"`
 	Provider          string    `json:"provider"`
 	Realm             string    `json:"realm"`
 	Disabled          bool      `json:"disabled"`
@@ -67,7 +69,7 @@ type Status struct {
 
 func status(a Account) Status {
 	available, total := availableBalance(a.Credits, a.Total, a.Quotas)
-	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "doubao", Realm: "cn", Disabled: a.Disabled, VerifiedAt: a.VerifiedAt, CheckinSupported: false, CheckinDone: false, LastCheckinDate: a.LastCheckinDate, CheckinContinuous: a.CheckinContinuous, CheckinTotalDays: a.CheckinTotalDays, CheckinPoints: a.CheckinPoints, WorkReady: a.DeviceID != "", Credits: a.Credits, Total: a.Total, AvailableCredits: available, AvailableTotal: total, Quotas: append([]Quota{}, a.Quotas...), Plan: a.Plan, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, LastError: a.LastError}
+	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, AvatarURL: a.AvatarURL, Provider: "doubao", Realm: "cn", Disabled: a.Disabled, VerifiedAt: a.VerifiedAt, CheckinSupported: false, CheckinDone: false, LastCheckinDate: a.LastCheckinDate, CheckinContinuous: a.CheckinContinuous, CheckinTotalDays: a.CheckinTotalDays, CheckinPoints: a.CheckinPoints, WorkReady: a.DeviceID != "", Credits: a.Credits, Total: a.Total, AvailableCredits: available, AvailableTotal: total, Quotas: append([]Quota{}, a.Quotas...), Plan: a.Plan, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, LastError: a.LastError}
 }
 
 type Store struct {
@@ -188,6 +190,9 @@ func (s *Store) Add(ctx context.Context, a Account, expected string) (Status, er
 		}
 		if a.DeviceID == "" {
 			a.DeviceID, a.WebID, a.Fingerprint = old.DeviceID, old.WebID, old.Fingerprint
+		}
+		if a.AvatarURL == "" {
+			a.AvatarURL = old.AvatarURL
 		}
 		a.ID, a.Disabled = old.ID, old.Disabled
 		a.Credits, a.BalanceKnown, a.BalanceUpdatedAt = old.Credits, old.BalanceKnown, old.BalanceUpdatedAt

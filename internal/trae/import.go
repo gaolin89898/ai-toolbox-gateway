@@ -197,7 +197,7 @@ func (s *Store) Import(raw []byte, password string) (ImportResult, error) {
 		} else {
 			a.ID = accountID(a.AccountUID)
 			if a.Nickname == "" {
-				a.Nickname = "Trae 账号"
+				a.Nickname = fallbackNickname
 			}
 			accounts = append(accounts, a)
 			result.Imported++

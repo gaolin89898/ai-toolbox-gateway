@@ -152,7 +152,7 @@ func TestCancelledAddDoesNotWaitForScheduledOperation(t *testing.T) {
 type upstreamFixture struct {
 	mu                                        sync.Mutex
 	checked                                   bool
-	claims, refreshes, balances               int
+	claims, refreshes, balances, profiles     int
 	badBalance, authFailure, claimUnconfirmed bool
 	token                                     string
 }
@@ -189,7 +189,8 @@ func testStore(t *testing.T) (*Store, *upstreamFixture) {
 		}
 		switch r.URL.Path {
 		case "/cloudide/api/v3/trae/GetUserInfo":
-			w.Write([]byte(`{"Result":{"UserID":"user-001","ScreenName":"Trae 测试账号"}}`))
+			f.profiles++
+			w.Write([]byte(`{"Result":{"UserID":"user-001","ScreenName":"Trae 测试账号","AvatarUrl":"https://lf3-static.trae.com.cn/avatar.png"}}`))
 		case "/trae/api/v2/ug/checkin_credits/status":
 			json.NewEncoder(w).Encode(map[string]any{"code": 0, "enable": true, "checked_in": f.checked})
 		case "/trae/api/v2/ug/checkin_credits/claim":
@@ -227,7 +228,7 @@ func TestAccountLifecycleAndCredentialIsolation(t *testing.T) {
 	if err != nil || len(warnings) != 0 {
 		t.Fatalf("add: %v %v", err, warnings)
 	}
-	if a.Credits != 130.25 || a.Total != 200.5 || !a.BalanceKnown || a.CheckinDone || f.refreshes != 1 {
+	if a.Credits != 130.25 || a.Total != 200.5 || a.AvatarURL != "https://lf3-static.trae.com.cn/avatar.png" || !a.BalanceKnown || a.CheckinDone || f.refreshes != 1 {
 		t.Fatalf("incorrect initial account: %+v", a)
 	}
 	public, _ := json.Marshal(s.List())
@@ -268,6 +269,32 @@ func TestAccountLifecycleAndCredentialIsolation(t *testing.T) {
 	reopened, err = Open(s.path, s.client)
 	if err != nil || len(reopened.List()) != 0 {
 		t.Fatal("removed credentials remained in the store")
+	}
+}
+
+func TestBalanceRefreshBackfillsProfileOncePerDay(t *testing.T) {
+	s, f := testStore(t)
+	a, _, err := s.Add(context.Background(), Account{Token: f.token, Session: "private-session-for-test", DeviceID: "1234567890123456"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts := s.snapshot()
+	accounts[0].AvatarURL = ""
+	accounts[0].ProfileCheckedAt = time.Time{}
+	if err := s.commit(accounts); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Action(context.Background(), a.UID, "balance"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.List()[0].AvatarURL; got != "https://lf3-static.trae.com.cn/avatar.png" || f.profiles != 2 {
+		t.Fatalf("profile was not backfilled: avatar=%q profile requests=%d", got, f.profiles)
+	}
+	if _, _, err := s.Action(context.Background(), a.UID, "balance"); err != nil {
+		t.Fatal(err)
+	}
+	if f.profiles != 2 {
+		t.Fatalf("profile lookup repeated within 24 hours: %d requests", f.profiles)
 	}
 }
 

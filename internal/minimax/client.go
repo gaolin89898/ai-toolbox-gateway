@@ -63,9 +63,10 @@ func NewClient() *Client {
 }
 
 const (
-	AuthAuto   = ""
-	AuthCookie = "cookie"
-	AuthBearer = "bearer"
+	AuthAuto         = ""
+	AuthCookie       = "cookie"
+	AuthBearer       = "bearer"
+	fallbackNickname = "MiniMax 账号"
 )
 
 // detectAuthKind 依据凭证形态推断鉴权方式：形如 "k=v; k2=v2" 视为
@@ -341,15 +342,21 @@ func (c *Client) signinStatus(ctx context.Context, a *Account) (signinPanel, err
 
 func (c *Client) identify(ctx context.Context, a *Account) error {
 	// 身份优先取自令牌 JWT（account_id / sub），与桌面端 fetchIdentity 一致；
-	// 再尽力回读 /v1/api/user/info 补昵称。
+	// 再尽力回读 /v1/api/user/info 补账号资料。
 	token := strings.TrimSpace(a.Credential)
 	if a.AccountUID == "" {
 		if uid := userIDClaim(token); uid != "" {
 			a.AccountUID = uid
 		}
 	}
+	if time.Since(a.ProfileCheckedAt) < 24*time.Hour {
+		return nil
+	}
 	root, err := c.signedRequest(ctx, "GET", "/v1/api/user/info", *a, nil)
 	if err != nil {
+		if ctx.Err() == nil {
+			a.ProfileCheckedAt = time.Now()
+		}
 		var upstream *responseError
 		if errors.As(err, &upstream) && (upstream.code == 404 || upstream.code == 405) {
 			return nil // 资料端点不可用不算失败，身份已由 JWT 提供
@@ -360,10 +367,7 @@ func (c *Client) identify(ctx context.Context, a *Account) error {
 		return err
 	}
 	// 响应为 data.userInfo（realUserID 为数字主账号 ID），令牌不是 JWT 时身份只能来自这里。
-	profile := object(root["userInfo"])
-	if profile == nil {
-		profile = root
-	}
+	profile := profileObject(root)
 	uid := text(profile, "realUserID", "real_user_id", "uid", "userId", "user_id", "accountId", "account_id", "id")
 	if uid != "" && a.AccountUID != "" && a.AccountUID != uid {
 		return fmt.Errorf("MiniMax 凭证账号不一致，已拒绝更新")
@@ -371,10 +375,52 @@ func (c *Client) identify(ctx context.Context, a *Account) error {
 	if uid != "" {
 		a.AccountUID = uid
 	}
-	if name := text(profile, "name", "nickname", "nickName", "displayName", "username", "email", "subUserName"); name != "" {
-		a.Nickname = name
-	}
+	applyProfile(a, profile)
 	return nil
+}
+
+func profileObject(root map[string]json.RawMessage) map[string]json.RawMessage {
+	for _, key := range []string{"userInfo", "user_info", "profile", "user", "account", "data"} {
+		if profile := object(root[key]); profile != nil {
+			return profile
+		}
+	}
+	return root
+}
+
+func applyProfile(a *Account, profile map[string]json.RawMessage) {
+	if a.Nickname == "" || a.Nickname == fallbackNickname {
+		if name := text(profile, "name", "nickname", "nickName", "displayName", "username", "userName", "user_name", "email", "subUserName", "sub_user_name"); name != "" {
+			a.Nickname = name
+		}
+	}
+	avatar := text(profile, "avatarUrl", "avatarURL", "avatar_url", "avatar", "headImg", "head_img", "picture", "pictureUrl", "picture_url", "profilePicture", "profile_picture")
+	if avatar == "" {
+		for _, key := range []string{"avatar", "profilePicture", "profile_picture"} {
+			if nested := object(profile[key]); nested != nil {
+				avatar = text(nested, "url", "uri", "src", "avatarUrl", "avatar_url")
+				if avatar != "" {
+					break
+				}
+			}
+		}
+	}
+	if avatarURL := validAvatarURL(avatar); avatarURL != "" {
+		a.AvatarURL = avatarURL
+	}
+	a.ProfileCheckedAt = time.Now()
+}
+
+func validAvatarURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) > 2048 {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil {
+		return ""
+	}
+	return parsed.String()
 }
 
 // creditDetail 积分桶（credit_type：1=购买 2=签到赠予）；金额为字符串。

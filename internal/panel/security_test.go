@@ -50,6 +50,7 @@ func TestCSPDisallowsInlineScriptAndFraming(t *testing.T) {
 
 	for _, must := range []string{
 		"script-src 'self'",
+		"img-src 'self' data: https:",
 		"frame-ancestors 'none'",
 		"base-uri 'none'",
 		"default-src 'none'",

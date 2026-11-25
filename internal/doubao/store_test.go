@@ -28,7 +28,7 @@ func TestAccountLifecycleIdentityAndCredentialIsolation(t *testing.T) {
 			w.Write([]byte(`{"message":"error","data":{"error_code":13,"user_id":0,"description":"expired-private-session"}}`))
 			return
 		}
-		w.Write([]byte(`{"message":"success","data":{"user_id":` + uid + `,"screen_name":"测试豆包"}}`))
+		w.Write([]byte(`{"message":"success","data":{"user_id":` + uid + `,"screen_name":"测试豆包","avatar_url":"https://p3-avatar.doubao.com/test.png"}}`))
 	}))
 	defer upstream.Close()
 	path := filepath.Join(t.TempDir(), "doubao.json")
@@ -38,7 +38,7 @@ func TestAccountLifecycleIdentityAndCredentialIsolation(t *testing.T) {
 	}
 	ctx := context.Background()
 	a, err := s.Add(ctx, Account{Cookie: "first-private-session"}, "")
-	if err != nil || a.AccountUID != "1234567890123456789" || !a.BalanceKnown || a.Credits != 200 || a.Total != 200 || len(a.Quotas) != 2 {
+	if err != nil || a.AccountUID != "1234567890123456789" || a.AvatarURL != "https://p3-avatar.doubao.com/test.png" || !a.BalanceKnown || a.Credits != 200 || a.Total != 200 || len(a.Quotas) != 2 {
 		t.Fatalf("bad identity or capabilities: %+v %v", a, err)
 	}
 	if _, err = s.Action(ctx, a.UID, "disable"); err != nil {
@@ -72,7 +72,7 @@ func TestAccountLifecycleIdentityAndCredentialIsolation(t *testing.T) {
 		t.Fatal("status leaks credentials")
 	}
 	reopened, err := Open(path, &Client{HTTP: upstream.Client(), Base: upstream.URL})
-	if err != nil || len(reopened.List()) != 1 {
+	if err != nil || len(reopened.List()) != 1 || reopened.List()[0].AvatarURL != a.AvatarURL {
 		t.Fatalf("persistence failed: %v", err)
 	}
 	if _, err = s.Action(ctx, a.UID, "remove"); err != nil || len(s.List()) != 0 {

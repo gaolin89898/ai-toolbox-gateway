@@ -55,7 +55,7 @@ func (s *Store) RememberDesktop(a Account) (Status, error) {
 	}
 	a.ID = accountID(uid)
 	if a.Nickname == "" {
-		a.Nickname = "Trae 账号"
+		a.Nickname = fallbackNickname
 	}
 	accounts = append(accounts, a)
 	if err := s.commit(accounts); err != nil {

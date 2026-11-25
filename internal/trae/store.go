@@ -22,6 +22,7 @@ type Account struct {
 	ID               string         `json:"id"`
 	AccountUID       string         `json:"account_uid"`
 	Nickname         string         `json:"nickname"`
+	AvatarURL        string         `json:"avatar_url,omitempty"`
 	Token            string         `json:"token"`
 	Session          string         `json:"session"`
 	DeviceID         string         `json:"device_id"`
@@ -34,6 +35,7 @@ type Account struct {
 	CheckinSupported *bool          `json:"checkin_supported,omitempty"`
 	TokenUpdatedAt   time.Time      `json:"token_updated_at"`
 	BalanceUpdatedAt time.Time      `json:"balance_updated_at"`
+	ProfileCheckedAt time.Time      `json:"profile_checked_at,omitempty"`
 	LastError        string         `json:"last_error,omitempty"`
 }
 
@@ -41,6 +43,7 @@ type Status struct {
 	UID              string    `json:"uid"`
 	AccountUID       string    `json:"account_uid"`
 	Nickname         string    `json:"nickname"`
+	AvatarURL        string    `json:"avatar_url,omitempty"`
 	Provider         string    `json:"provider"`
 	Realm            string    `json:"realm"`
 	Disabled         bool      `json:"disabled"`
@@ -93,7 +96,7 @@ func (s *Store) SetRefreshEnabled(enabled bool) { s.refreshDisabled.Store(!enabl
 
 func status(a Account) Status {
 	_, expiry := tokenInfo(a.Token)
-	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "trae", Realm: "cn", Disabled: a.Disabled,
+	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, AvatarURL: a.AvatarURL, Provider: "trae", Realm: "cn", Disabled: a.Disabled,
 		Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown, CheckinDone: a.LastCheckinDate == chinaDay(time.Now()),
 		CheckinSupported: a.CheckinSupported, TokenExpiresAt: expiry, HasSession: a.Session != "", HasOAuth: a.OAuth != nil, BalanceUpdatedAt: a.BalanceUpdatedAt, LastError: a.LastError}
 }
@@ -289,8 +292,11 @@ func (s *Store) add(ctx context.Context, a Account, expectedID string) (Status, 
 				a.LastCheckinDate = existing.LastCheckinDate
 			}
 			a.Disabled = existing.Disabled
-			if a.OAuth != nil && name == "" && existing.Nickname != "" {
+			if a.OAuth != nil && name == "" && existing.Nickname != "" && existing.Nickname != fallbackNickname {
 				a.Nickname = existing.Nickname
+			}
+			if a.AvatarURL == "" {
+				a.AvatarURL = existing.AvatarURL
 			}
 			a.Credits, a.Total, a.BalanceKnown = existing.Credits, existing.Total, existing.BalanceKnown
 			a.BalanceUpdatedAt = existing.BalanceUpdatedAt
@@ -326,6 +332,14 @@ func (s *Store) add(ctx context.Context, a Account, expectedID string) (Status, 
 	return status(a), warnings, nil
 }
 
+// backfillProfile lets older accounts pick up profile details on balance refresh.
+func (s *Store) backfillProfile(ctx context.Context, a *Account) {
+	if time.Since(a.ProfileCheckedAt) < 24*time.Hour {
+		return
+	}
+	s.client.fetchProfile(ctx, a)
+}
+
 func (s *Store) Action(ctx context.Context, id, action string) (Status, string, error) {
 	s.op.Lock()
 	defer s.op.Unlock()
@@ -354,6 +368,7 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, string, 
 			}
 			err = s.client.balance(ctx, a)
 			if err == nil {
+				s.backfillProfile(ctx, a)
 				_, _, statusErr := s.client.status(ctx, a)
 				if statusErr != nil {
 					warning = statusErr.Error()

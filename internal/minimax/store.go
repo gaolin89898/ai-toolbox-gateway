@@ -20,6 +20,7 @@ type Account struct {
 	ID               string    `json:"id"`
 	AccountUID       string    `json:"account_uid,omitempty"`
 	Nickname         string    `json:"nickname"`
+	AvatarURL        string    `json:"avatar_url,omitempty"`
 	Credential       string    `json:"credential"`
 	AuthKind         string    `json:"auth_kind,omitempty"`
 	RefreshToken     string    `json:"refresh_token,omitempty"`
@@ -29,6 +30,7 @@ type Account struct {
 	Total            float64   `json:"credits_total"`
 	BalanceKnown     bool      `json:"balance_known"`
 	BalanceUpdatedAt time.Time `json:"balance_updated_at"`
+	ProfileCheckedAt time.Time `json:"profile_checked_at,omitempty"`
 	LastPeriod       string    `json:"last_period"`
 	LastError        string    `json:"last_error,omitempty"`
 }
@@ -37,6 +39,7 @@ type Status struct {
 	UID              string    `json:"uid"`
 	AccountUID       string    `json:"account_uid"`
 	Nickname         string    `json:"nickname"`
+	AvatarURL        string    `json:"avatar_url,omitempty"`
 	Provider         string    `json:"provider"`
 	Realm            string    `json:"realm"`
 	Disabled         bool      `json:"disabled"`
@@ -52,7 +55,7 @@ type Status struct {
 }
 
 func status(a Account) Status {
-	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "minimax", Realm: "cn", Disabled: a.Disabled, Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, CheckinDone: a.LastPeriod != "" && a.LastPeriod == RewardPeriod(time.Now()), AuthKind: a.AuthKind, HasRefresh: a.RefreshToken != "", TokenExpiresAt: a.ExpiresAt, LastError: a.LastError}
+	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, AvatarURL: a.AvatarURL, Provider: "minimax", Realm: "cn", Disabled: a.Disabled, Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, CheckinDone: a.LastPeriod != "" && a.LastPeriod == RewardPeriod(time.Now()), AuthKind: a.AuthKind, HasRefresh: a.RefreshToken != "", TokenExpiresAt: a.ExpiresAt, LastError: a.LastError}
 }
 
 type Store struct {
@@ -177,11 +180,11 @@ func (s *Store) Add(ctx context.Context, a Account, expected string) (Status, []
 		}
 		uidWarn = err.Error()
 	}
-	if name != "" {
+	if name != "" && name != fallbackNickname {
 		a.Nickname = name
 	}
 	if a.Nickname == "" {
-		a.Nickname = "MiniMax 账号"
+		a.Nickname = fallbackNickname
 	}
 	accounts := s.snapshot()
 	index := -1
@@ -215,6 +218,12 @@ func (s *Store) Add(ctx context.Context, a Account, expected string) (Status, []
 		a.Credits, a.Total, a.BalanceKnown = old.Credits, old.Total, old.BalanceKnown
 		a.BalanceUpdatedAt = old.BalanceUpdatedAt
 		a.LastPeriod = old.LastPeriod
+		if a.Nickname == fallbackNickname && old.Nickname != "" {
+			a.Nickname = old.Nickname
+		}
+		if a.AvatarURL == "" {
+			a.AvatarURL = old.AvatarURL
+		}
 		accounts[index] = a
 	} else {
 		a.ID = accountID(a.AccountUID)

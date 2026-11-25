@@ -100,6 +100,7 @@ func (c *Client) Inspect(ctx context.Context, a *Account) error {
 			UserID     json.Number `json:"user_id"`
 			ScreenName string      `json:"screen_name"`
 			Nickname   string      `json:"nickname"`
+			AvatarURL  string      `json:"avatar_url"`
 			ErrorCode  int         `json:"error_code"`
 		} `json:"data"`
 	}
@@ -114,12 +115,28 @@ func (c *Client) Inspect(ctx context.Context, a *Account) error {
 		return fmt.Errorf("新凭证属于另一个豆包账号，请单独添加")
 	}
 	a.AccountUID = uid
-	if a.Nickname == "" {
-		a.Nickname = root.Data.ScreenName
-		if a.Nickname == "" {
+	if avatarURL := validAvatarURL(root.Data.AvatarURL); avatarURL != "" {
+		a.AvatarURL = avatarURL
+	}
+	if a.Nickname == "" || a.Nickname == "豆包账号" {
+		if root.Data.ScreenName != "" {
+			a.Nickname = root.Data.ScreenName
+		} else if root.Data.Nickname != "" {
 			a.Nickname = root.Data.Nickname
 		}
 	}
 	a.VerifiedAt = time.Now()
 	return nil
+}
+
+func validAvatarURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) > 2048 {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil {
+		return ""
+	}
+	return parsed.String()
 }
