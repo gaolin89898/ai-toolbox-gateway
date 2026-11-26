@@ -28,6 +28,7 @@ type Account struct {
 	DeviceID         string         `json:"device_id"`
 	OAuth            *OAuthIdentity `json:"oauth,omitempty"`
 	Disabled         bool           `json:"disabled"`
+	Plan             string         `json:"plan"`
 	Credits          float64        `json:"credits"`
 	Total            float64        `json:"credits_total"`
 	BalanceKnown     bool           `json:"balance_known"`
@@ -47,6 +48,7 @@ type Status struct {
 	Provider         string    `json:"provider"`
 	Realm            string    `json:"realm"`
 	Disabled         bool      `json:"disabled"`
+	Plan             string    `json:"plan"`
 	Credits          float64   `json:"credits"`
 	Total            float64   `json:"credits_total"`
 	BalanceKnown     bool      `json:"balance_known"`
@@ -96,7 +98,7 @@ func (s *Store) SetRefreshEnabled(enabled bool) { s.refreshDisabled.Store(!enabl
 
 func status(a Account) Status {
 	_, expiry := tokenInfo(a.Token)
-	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, AvatarURL: a.AvatarURL, Provider: "trae", Realm: "cn", Disabled: a.Disabled,
+	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, AvatarURL: a.AvatarURL, Provider: "trae", Realm: "cn", Disabled: a.Disabled, Plan: a.Plan,
 		Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown, CheckinDone: a.LastCheckinDate == chinaDay(time.Now()),
 		CheckinSupported: a.CheckinSupported, TokenExpiresAt: expiry, HasSession: a.Session != "", HasOAuth: a.OAuth != nil, BalanceUpdatedAt: a.BalanceUpdatedAt, LastError: a.LastError}
 }

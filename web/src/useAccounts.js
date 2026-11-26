@@ -10,11 +10,36 @@ const localStorage = hostRuntime.storage;
 export const KEY_STORAGE = 'wb2api.key';
 const REMARK_STORAGE = 'wb.accounts.remarks';
 const WORKBUDDY_REALM_STORAGE = 'wb.accounts.workbuddy-realm';
+const AUTO_REFRESH_STORAGE = 'wb.accounts.auto-refresh-seconds';
+export const AUTO_REFRESH_OPTIONS = [0, 5, 10, 15, 20, 25, 30];
 const ZONE = 'Asia/Shanghai';
+
+export function normalizeAutoRefreshSeconds(value) {
+  const seconds = Number(value);
+  return AUTO_REFRESH_OPTIONS.includes(seconds) ? seconds : 0;
+}
 
 export function formatHour(hour) { return String(hour).padStart(2, '0') + ':00'; }
 export function formatNumber(value) { return Number(value || 0).toLocaleString('zh-CN'); }
-export function providerSupportsCheckin(provider) { return !['qoder', 'doubao', 'antigravity'].includes(provider); }
+export function computeNextCheckin(hours, referenceNow = Date.now()) {
+  const validHours = [...new Set((hours || []).map(Number).filter(h => Number.isInteger(h) && h >= 0 && h <= 23))];
+  if (!validHours.length) return null;
+  const china = new Date(referenceNow + 8 * 3600000);
+  const day = Date.UTC(china.getUTCFullYear(), china.getUTCMonth(), china.getUTCDate()) - 8 * 3600000;
+  const next = Math.min(...validHours.map(h => {
+    const value = day + h * 3600000;
+    return value > referenceNow ? value : value + 86400000;
+  }));
+  const minutes = Math.max(1, Math.ceil((next - referenceNow) / 60000));
+  return {
+    timestamp: next,
+    time: new Date(next).toLocaleTimeString('zh-CN', { timeZone: ZONE, hour: '2-digit', minute: '2-digit', hour12: false }),
+    day: chinaDate(next) === chinaDate(referenceNow) ? '今天' : '明天',
+    date: new Date(next).toLocaleDateString('zh-CN', { timeZone: ZONE, year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }),
+    remaining: minutes >= 60 ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分` : `${minutes} 分钟`,
+  };
+}
+export function providerSupportsCheckin(provider) { return !['antigravity', 'doubao'].includes(provider); }
 export function canCheckin(account) { return providerSupportsCheckin(account.provider) && !account.disabled && !account.enterprise && account.realm !== 'global' && account.checkin_supported !== false; }
 export function accountEdition(account) { return account.provider === 'doubao' ? '豆包' : account.provider === 'antigravity' ? 'Antigravity' : account.provider === 'minimax' ? 'MiniMax 国内版' : account.provider === 'qoder' ? 'Qoder 国内版' : account.provider === 'trae' ? 'Trae 国内版' : account.enterprise ? '企业版' : account.realm === 'global' ? '国际版' : '国内版'; }
 export function accountCredits(account) { return account.balance_known === false ? '--' : formatNumber(account.provider === 'doubao' ? account.available_credits ?? account.credits : account.credits); }
@@ -30,6 +55,17 @@ export function planLabel(userType) {
   if (t.includes('enterprise')) return '企业版';
   return userType;
 }
+// 账号名称旁的身份徽章：只在有套餐/版本身份时显示（豆包 plan、
+// WorkBuddy/Qoder 的 user_type、Antigravity 的 tier、企业标记）。
+// 国内版/国际版由页面切换器与状态列表达，不再作为徽章兜底。
+export function accountBadge(account) {
+  if (!account) return '';
+  if (account.plan) return account.plan;
+  if (account.user_type) return planLabel(account.user_type);
+  if (account.tier) return account.tier;
+  if (account.enterprise) return '企业版';
+  return '';
+}
 export function checkinState(account) {
 
   if (!providerSupportsCheckin(account.provider) || account.enterprise || account.realm === 'global' || account.checkin_supported === false) return { text: '不支持签到', kind: 'muted' };
@@ -42,6 +78,12 @@ export function useAccounts() {
   const workbuddyAccounts = ref([]), traeAccounts = ref([]), qoderAccounts = ref([]), minimaxAccounts = ref([]), antigravityAccounts = ref([]), doubaoAccounts = ref([]), allLogs = ref([]), overview = ref({});
   const provider = ref(['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(localStorage.getItem('wb.accounts.provider')) ? localStorage.getItem('wb.accounts.provider') : 'workbuddy');
   const workbuddyRealm = ref(localStorage.getItem(WORKBUDDY_REALM_STORAGE) === 'global' ? 'global' : 'cn');
+  const autoRefreshSeconds = ref(normalizeAutoRefreshSeconds(localStorage.getItem(AUTO_REFRESH_STORAGE)));
+  function setAutoRefreshSeconds(value) {
+    const normalized = normalizeAutoRefreshSeconds(value);
+    autoRefreshSeconds.value = normalized;
+    localStorage.setItem(AUTO_REFRESH_STORAGE, String(normalized));
+  }
   const platformSelection = computed(() => provider.value === 'workbuddy' ? `workbuddy-${workbuddyRealm.value}` : provider.value);
   const providerName = computed(() => provider.value === 'workbuddy' ? `WorkBuddy ${workbuddyRealm.value === 'global' ? '国际版' : '国内版'}` : ({ trae: 'Trae', qoder: 'Qoder', minimax: 'MiniMax', antigravity: 'Antigravity', doubao: '豆包' })[provider.value]);
   const accounts = computed(() => provider.value === 'workbuddy'
@@ -49,7 +91,7 @@ export function useAccounts() {
     : ({ trae: traeAccounts.value, qoder: qoderAccounts.value, minimax: minimaxAccounts.value, antigravity: antigravityAccounts.value, doubao: doubaoAccounts.value })[provider.value]);
   const logs = computed(() => allLogs.value.filter(e => provider.value === 'workbuddy' ? !/^(trae|qoder|minimax|antigravity|doubao):/.test(e.text) : e.text.startsWith(provider.value + ':')));
   const apiPrefix = value => ['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(value) ? value + '/' : '';
-  const effectiveHours = computed(() => [...new Set(schedule.value?.checkin_hours || [])].sort((a, b) => a - b));
+  const effectiveHours = computed(() => [...new Set((schedule.value?.checkin_hours || []).map(h => provider.value === 'qoder' ? Math.max(10, h) : h))].sort((a, b) => a - b));
   const schedule = ref(null), connected = ref(false), loading = ref(true), error = ref('');
   const desktopClients = ref([]), desktopJob = ref(null), desktopError = ref('');
   const pendingDesktopSwitch = ref(null);
@@ -148,6 +190,7 @@ export function useAccounts() {
   const abort = new AbortController();
   let overviewFlight, pollTimer, refreshTimer, clockTimer, loginAttempt = 0;
   let doubaoAutoBalanceAt = 0;
+  let qoderAutoStatusAt = 0;
   let loginBrowser;
   let traePollTimer, traeLoginAttempt = 0;
 
@@ -175,25 +218,9 @@ export function useAccounts() {
   const todayLogs = computed(() => logs.value.filter(e => chinaDate(e.ts) === today.value));
   const allTodayLogs = computed(() => allLogs.value.filter(e => chinaDate(e.ts) === today.value));
   const recentActivity = computed(() => logs.value.filter(e => e.ch === 'task').slice(-3).reverse());
-  const nextRunFor = hours => {
-    if (!schedule.value?.checkin_enabled || !schedule.value.checkin_hours?.length) return null;
-    const china = new Date(now.value + 8 * 3600000);
-    const day = Date.UTC(china.getUTCFullYear(), china.getUTCMonth(), china.getUTCDate()) - 8 * 3600000;
-    const next = Math.min(...hours.map(h => {
-      const value = day + h * 3600000;
-      return value > now.value ? value : value + 86400000;
-    }));
-    const minutes = Math.max(1, Math.ceil((next - now.value) / 60000));
-    return {
-      timestamp: next,
-      time: new Date(next).toLocaleTimeString('zh-CN', { timeZone: ZONE, hour: '2-digit', minute: '2-digit', hour12: false }),
-      day: chinaDate(next) === chinaDate(now.value) ? '今天' : '明天',
-      date: new Date(next).toLocaleDateString('zh-CN', { timeZone: ZONE, year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }),
-      remaining: minutes >= 60 ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分` : `${minutes} 分钟`,
-    };
-  };
-  const allNextRun = computed(() => nextRunFor(effectiveHours.value));
-  const nextRun = computed(() => providerSupportsCheckin(provider.value) ? allNextRun.value : null);
+  const nextRunFor = hours => (schedule.value?.checkin_enabled ? computeNextCheckin(hours, now.value) : null);
+  const nextRun = computed(() => provider.value === 'antigravity' ? null : nextRunFor(effectiveHours.value));
+  const allNextRun = computed(() => nextRunFor([...new Set(schedule.value?.checkin_hours || [])].sort((a, b) => a - b)));
   const expiryEntries = computed(() => accounts.value.flatMap(account =>
     (account.credits_expiry_buckets || []).map(bucket => ({ ...bucket, uid: account.uid, name: accountName(account) }))
   ).filter(b => Number(b.remain) > 0 && new Date(b.expires_at || b.date).getTime() > now.value)
@@ -265,17 +292,20 @@ export function useAccounts() {
       }
     }, { quiet });
   }
-  async function refreshBalances() {
+  async function refreshBalances({ quiet = false } = {}) {
     return action('balances', async () => {
       const selected = provider.value;
       if (selected === 'doubao') doubaoAutoBalanceAt = Date.now();
+      if (selected === 'qoder') qoderAutoStatusAt = Date.now();
       const data = await api(apiPrefix(selected) + 'balance_all', { method: 'POST' });
-      if (data.errors?.length) Message.warning(data.errors.join('；'));
-      else Message.success(selected === 'antigravity' ? '授权状态已刷新' : selected === 'doubao' ? '额度刷新完成' : '积分刷新完成');
+      if (!quiet) {
+        if (data.errors?.length) Message.warning(data.errors.join('；'));
+        else Message.success(selected === 'antigravity' ? '授权状态已刷新' : selected === 'doubao' ? '额度刷新完成' : '积分刷新完成');
+      }
       await overviewFlight?.catch(() => {});
       await refreshOverview();
-      await refreshLogs();
-    });
+      if (!quiet) await refreshLogs();
+    }, { quiet });
   }
   async function refreshDoubaoBalances() {
     if (provider.value !== 'doubao' || !connected.value || !doubaoAccounts.value.length || busy.has('balances') || Date.now() - doubaoAutoBalanceAt < 60000) return;
@@ -288,12 +318,39 @@ export function useAccounts() {
       await refreshOverview();
     }, { quiet: true });
   }
-  watch([provider, connected], () => { refreshDoubaoBalances().catch(() => {}); });
+  async function refreshQoderStatus() {
+    if (provider.value !== 'qoder' || !connected.value || !qoderAccounts.value.length || busy.has('balances') || Date.now() - qoderAutoStatusAt < 5 * 60 * 1000) return;
+    qoderAutoStatusAt = Date.now();
+    await action('balances', async () => {
+      await api('qoder/balance_all', { method: 'POST' });
+      await overviewFlight?.catch(() => {});
+      await refreshOverview();
+    }, { quiet: true });
+  }
+  watch([provider, connected], () => {
+    refreshDoubaoBalances().catch(() => {});
+    refreshQoderStatus().catch(() => {});
+  });
   async function checkinAll() {
     if (!providerSupportsCheckin(provider.value)) return;
     return action('checkin-all', async () => {
       await api(apiPrefix(provider.value) + 'checkin_all', { method: 'POST' });
       Message.success('签到已开始');
+      await refreshOverview();
+      await refreshLogs();
+    });
+  }
+  async function checkinAllPlatforms() {
+    if (!allPending.value.length) return;
+    return action('checkin-all-global', async () => {
+      const hasMain = allPending.value.some(account => ['workbuddy', 'trae', 'minimax'].includes(account.provider || 'workbuddy'));
+      const hasQoder = allPending.value.some(account => account.provider === 'qoder');
+      const jobs = [];
+      if (hasMain) jobs.push(api('checkin_all', { method: 'POST' }));
+      if (hasQoder) jobs.push(api('qoder/checkin_all', { method: 'POST' }));
+      if (!jobs.length) return;
+      await Promise.all(jobs);
+      Message.success('全平台签到已开始');
       await refreshOverview();
       await refreshLogs();
     });
@@ -768,7 +825,7 @@ export function useAccounts() {
     allAccounts, allEligible, allSigned, allPending, allTodayLogs, allNextRun,
     recentActivity, nextRun, expiryEntries, addVisible, addTab, realm, login,
     importFile, importResult, updatedAt, savedAt, connect, refreshOverview, refreshLogs,
-    refreshBalances, checkinAll, accountAction, saveRemark, saveSchedule,
+    refreshBalances, autoRefreshSeconds, setAutoRefreshSeconds, checkinAll, checkinAllPlatforms, accountAction, saveRemark, saveSchedule,
     openAdd, closeAdd, startLogin, importAccounts, resetLogin: stopLogin,
   };
 }

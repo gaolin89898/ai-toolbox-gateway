@@ -35,6 +35,18 @@ function getDotClass(name = '') {
   return 'dot-default';
 }
 
+// 上游 description 是固定格式的英文文案（Models within this group: A, B），
+// 展示层翻译成中文；其他未知格式保持原文兜底。
+function groupTip(description) {
+  const text = String(description || '');
+  const marker = 'Models within this group:';
+  if (text.startsWith(marker)) {
+    const models = text.slice(marker.length).split(',').map(s => s.trim()).filter(Boolean);
+    if (models.length) return `该分组包含模型：${models.join('、')}`;
+  }
+  return text;
+}
+
 function getPercent(remaining) {
   const val = Number(remaining);
   if (!Number.isFinite(val)) return 0;
@@ -70,7 +82,7 @@ function getBarColor(remaining) {
       <div class="ag-group-head">
         <span class="ag-group-dot" :class="getDotClass(g.name)" />
         <span class="ag-group-name">{{ g.name }}</span>
-        <a-tooltip v-if="g.description" :content="g.description" position="top" mini>
+        <a-tooltip v-if="g.description" :content="groupTip(g.description)" position="top" mini>
           <icon-info-circle class="ag-group-info" />
         </a-tooltip>
       </div>

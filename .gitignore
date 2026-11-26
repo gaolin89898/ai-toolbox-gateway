@@ -38,7 +38,7 @@ docs/
 *.md
 !README.md
 
-# Windows binaries
+# Windows binaries（根目录所有 exe 均为构建/实验产物）
 /wb2api.exe
 /wb2api-next.exe
 /wb2api.exe.bak-*
@@ -46,6 +46,14 @@ docs/
 /AccountsDesktop.exe
 /login.exe
 /credit.exe
+/*.exe
+
+# 本地探测与截图临时产物
+.playwright-cli/
+.screenshots/
+.pm-probe.*
+/logo-request.json
+/panel-home.png
 
 # 本地验证工具（判据逆向过程脚本，结论沉淀于 data/desktop-task-protocol.md）
 /cmd/desktopverify*/

@@ -188,13 +188,13 @@ func newAppRuntime(configPath string, cfg *Config, gateway bool) (*appRuntime, e
 	}
 
 	// 签到入口（自动排程 / 启动补签 / 面板手动触发共用）：
-	// WorkBuddy 池签到由 scheduler 负责，Trae / MiniMax 经 CheckinHook
-	// 同批执行（Antigravity、豆包不做签到）。
+	// WorkBuddy 池签到由 scheduler 负责，旁路平台经 CheckinHook 同批执行。
 	runSideCheckin := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		rt.trae.RunAll(ctx, "checkin")
 		rt.minimax.RunAll(ctx, "checkin")
+		rt.doubao.RunAll(ctx, "checkin")
 	}
 	// 调度器：签到永远按 account-settings.json；网关任务族（旅行/活跃/保活/
 	// 夜猫子/成长/连登）仅网关模式按 config 生效——账号模式恒关，且迁移已把
@@ -355,7 +355,9 @@ func applySideRefresh(rt *appRuntime) {
 	refresh := rt.settings.schedule.RefreshAfterCheckin
 	rt.settings.mu.Unlock()
 	rt.trae.SetRefreshEnabled(refresh)
+	rt.qoder.SetRefreshEnabled(refresh)
 	rt.minimax.SetRefreshEnabled(refresh)
+	rt.doubao.SetRefreshEnabled(refresh)
 }
 
 // logSchedulerStatus 启动日志：说明各任务族的实际生效状态。
@@ -365,7 +367,7 @@ func logSchedulerStatus(rt *appRuntime) {
 	if !s.Enabled {
 		log.Printf("签到已禁用（签到设置 checkin_enabled=false）")
 	} else {
-		log.Printf("签到已启用：%v 点（WorkBuddy + Trae + MiniMax 同批）", s.Hours)
+		log.Printf("签到已启用：%v 点（WorkBuddy + Trae + MiniMax + 豆包同批；Qoder 活动轮次独立排程）", s.Hours)
 	}
 	if !rt.gateway {
 		log.Printf("账号管理模式：/v1/* 转发、Redis 镜像、用量记录未启用（-gateway 开启网关）")
@@ -521,6 +523,7 @@ func startUnifiedWithListener(parent context.Context, configPath string, cfg *Co
 	defer stop()
 	go rt.sch.Run(ctx)
 	go rt.observeSideProviderCredits(ctx)
+	go runQoderSchedule(ctx, rt.settings, rt.qoder)
 	if gateway {
 		rt.sch.StartBalanceRefresh(ctx, cfg.BalanceRefreshInterval)
 		rt.sch.StartTaskSweep(ctx, cfg.TaskSweepInterval)
@@ -531,6 +534,11 @@ func startUnifiedWithListener(parent context.Context, configPath string, cfg *Co
 	if rt.settings.schedule.Enabled && rt.settings.schedule.CatchupOnStart {
 		go rt.sch.RunCheckinNow()
 		go rt.sch.RunCheckinHook()
+		go func() {
+			qoderCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+			rt.qoder.RunAll(qoderCtx, "checkin")
+		}()
 	}
 
 	srv := &http.Server{

@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	doubaoWork "github.com/linguo2625469/workbuddy2api-panel/internal/doubaowork"
@@ -69,7 +71,7 @@ type Status struct {
 
 func status(a Account) Status {
 	available, total := availableBalance(a.Credits, a.Total, a.Quotas)
-	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, AvatarURL: a.AvatarURL, Provider: "doubao", Realm: "cn", Disabled: a.Disabled, VerifiedAt: a.VerifiedAt, CheckinSupported: false, CheckinDone: false, LastCheckinDate: a.LastCheckinDate, CheckinContinuous: a.CheckinContinuous, CheckinTotalDays: a.CheckinTotalDays, CheckinPoints: a.CheckinPoints, WorkReady: a.DeviceID != "", Credits: a.Credits, Total: a.Total, AvailableCredits: available, AvailableTotal: total, Quotas: append([]Quota{}, a.Quotas...), Plan: a.Plan, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, LastError: a.LastError}
+	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, AvatarURL: a.AvatarURL, Provider: "doubao", Realm: "cn", Disabled: a.Disabled, VerifiedAt: a.VerifiedAt, CheckinSupported: true, CheckinDone: a.LastCheckinDate != "" && a.LastCheckinDate == CheckinDay(time.Now()), LastCheckinDate: a.LastCheckinDate, CheckinContinuous: a.CheckinContinuous, CheckinTotalDays: a.CheckinTotalDays, CheckinPoints: a.CheckinPoints, WorkReady: a.DeviceID != "", Credits: a.Credits, Total: a.Total, AvailableCredits: available, AvailableTotal: total, Quotas: append([]Quota{}, a.Quotas...), Plan: a.Plan, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, LastError: a.LastError}
 }
 
 type Store struct {
@@ -78,7 +80,11 @@ type Store struct {
 	path           string
 	accounts       []Account
 	client         *Client
+	refreshEnabled atomic.Bool
 }
+
+// SetRefreshEnabled controls whether a check-in attempt also refreshes the balance.
+func (s *Store) SetRefreshEnabled(enabled bool) { s.refreshEnabled.Store(enabled) }
 
 func Open(path string, client *Client) (*Store, error) {
 	if client == nil {
@@ -260,6 +266,51 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, error) {
 			} else {
 				inspectErr = s.refreshBalance(ctx, a)
 			}
+		case "checkin":
+			if a.Disabled {
+				return status(*a), fmt.Errorf("该豆包账号已停用")
+			}
+			if !status(*a).CheckinDone {
+				checkin, checkinErr := s.client.Checkin(ctx, a)
+				if checkinErr != nil {
+					card, _ := s.client.CheckinLandingCard(ctx, a)
+					group, groupErr := s.client.CheckinGroupStatus(ctx, a)
+					if groupErr == nil && group.CheckedInToday && group.LastCheckinDate != "" {
+						a.LastCheckinDate = group.LastCheckinDate
+						a.CheckinContinuous, a.CheckinTotalDays = group.ContinuousDays, group.TotalDays
+						a.CheckinPoints = group.Points
+						a.LastError = ""
+						if s.refreshEnabled.Load() {
+							_ = s.refreshBalance(ctx, a)
+						}
+					} else {
+						if strings.Contains(checkinErr.Error(), "710010702") && card == CheckinDesktopOnlyCard {
+							checkinErr = fmt.Errorf("平台签到服务对该账号返回系统错误（710010702），属于平台侧账号活动异常；该账号签到需在豆包客户端完成，面板每天自动重试，平台恢复后会自动签到并计入额度")
+						}
+						if s.refreshEnabled.Load() {
+							_ = s.refreshBalance(ctx, a)
+						}
+						a.LastError = checkinErr.Error()
+						if commitErr := s.commit(accounts); commitErr != nil {
+							return Status{}, commitErr
+						}
+						return status(*a), checkinErr
+					}
+				} else {
+					a.LastCheckinDate = checkin.CheckinDate
+					a.CheckinContinuous, a.CheckinTotalDays = checkin.ContinuousDays, checkin.TotalDays
+					if group, err := s.client.CheckinGroupStatus(ctx, a); err == nil {
+						a.CheckinPoints = group.Points
+						if group.TotalDays > a.CheckinTotalDays {
+							a.CheckinTotalDays = group.TotalDays
+						}
+					}
+					a.LastError = ""
+					if s.refreshEnabled.Load() {
+						_ = s.refreshBalance(ctx, a)
+					}
+				}
+			}
 		default:
 			return Status{}, fmt.Errorf("不支持的豆包账号操作")
 		}
@@ -275,6 +326,26 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, error) {
 		return result, inspectErr
 	}
 	return Status{}, os.ErrNotExist
+}
+
+// RunAll runs an action for every enabled account and returns per-account failures.
+func (s *Store) RunAll(ctx context.Context, action string) []string {
+	failures := []string{}
+	for _, a := range s.List() {
+		if ctx.Err() != nil {
+			break
+		}
+		if a.Disabled || action == "checkin" && a.CheckinDone {
+			continue
+		}
+		if _, err := s.Action(ctx, a.UID, action); err != nil {
+			failures = append(failures, a.UID+": "+err.Error())
+			log.Printf("doubao: %s 失败 %s", action, err)
+		} else {
+			log.Printf("doubao: %s 完成", action)
+		}
+	}
+	return failures
 }
 
 // ImportClient 从本机豆包客户端导入登录态（DPAPI 解密的 Cookie 与设备上下文）。

@@ -16,35 +16,45 @@ func TestRetiredDoubaoTaskAndCheckinEndpoints(t *testing.T) {
 	accounts := pool.New("")
 	defer accounts.Close()
 	p := New(Config{AccountsOnly: true, Pool: accounts, APIKey: "test-key"})
-	for _, tc := range []struct{ method, path string }{
-		{http.MethodPost, "/panel/api/doubao/checkin_all"},
-		{http.MethodPost, "/panel/api/doubao/accounts/d1/tasks/claim"},
+	for _, tc := range []struct {
+		method string
+		path   string
+		status int
+	}{
+		{http.MethodPost, "/panel/api/doubao/checkin_all", http.StatusNotImplemented},
+		{http.MethodPost, "/panel/api/doubao/accounts/d1/tasks/claim", http.StatusNotFound},
 	} {
 		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader("{}"))
 		r.Header.Set("Authorization", "Bearer test-key")
 		w := httptest.NewRecorder()
 		p.ServeHTTP(w, r)
-		if w.Code != http.StatusNotFound {
-			t.Errorf("retired endpoint %s %s returned %d", tc.method, tc.path, w.Code)
+		if w.Code != tc.status {
+			t.Errorf("endpoint %s %s returned %d, want %d", tc.method, tc.path, w.Code, tc.status)
 		}
 	}
 }
 
-func TestRetiredQoderCheckinEndpoints(t *testing.T) {
+func TestQoderCheckinEndpointsAreRestored(t *testing.T) {
 	store, err := qoder.Open(filepath.Join(t.TempDir(), "accounts.json"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := New(Config{AccountsOnly: true, APIKey: "test-key", Qoder: store})
 	defer p.Close()
-	for _, path := range []string{"checkin_all", "accounts/qoder-1/checkin"} {
-		r := httptest.NewRequest(http.MethodPost, "/panel/api/qoder/"+path, nil)
-		r.Header.Set("Authorization", "Bearer test-key")
-		w := httptest.NewRecorder()
-		p.ServeHTTP(w, r)
-		if w.Code != http.StatusNotFound {
-			t.Errorf("retired Qoder endpoint %s returned %d", path, w.Code)
-		}
+	r := httptest.NewRequest(http.MethodPost, "/panel/api/qoder/checkin_all", nil)
+	r.Header.Set("Authorization", "Bearer test-key")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"started":true`) {
+		t.Fatalf("Qoder bulk check-in endpoint returned %d: %s", w.Code, w.Body)
+	}
+
+	r = httptest.NewRequest(http.MethodPost, "/panel/api/qoder/accounts/qoder-1/checkin", nil)
+	r.Header.Set("Authorization", "Bearer test-key")
+	w = httptest.NewRecorder()
+	p.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "Qoder 账号不存在") {
+		t.Fatalf("Qoder single-account check-in route not registered: %d %s", w.Code, w.Body)
 	}
 }
 

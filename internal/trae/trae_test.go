@@ -205,7 +205,9 @@ func testStore(t *testing.T) (*Store, *upstreamFixture) {
 				w.Write([]byte(`{"user_entitlement_pack_list":[{"entitlement_base_info":{"quota":{"credits_limit":"bad"}},"usage":{"credits_amount":"1"}}]}`))
 				return
 			}
-			w.Write([]byte(`{"user_entitlement_pack_list":[{"entitlement_base_info":{"quota":{"credits_limit":"150.5"}},"usage":{"credits_amount":"20.25"}},{"entitlement_base_info":{"quota":{"credits_limit":50}},"usage":{"credits_amount":100}}]}`))
+			// Billing summary short-circuits credit parsing, while the
+			// product_type=0 pack still carries the subscription tier name.
+			w.Write([]byte(`{"is_credits_billing":true,"usage_summary":{"total_amount":200.5,"consumed_amount":70.25},"user_entitlement_pack_list":[{"display_desc":"免费","entitlement_base_info":{"product_type":0},"status":1},{"entitlement_base_info":{"quota":{"credits_limit":"150.5"}},"usage":{"credits_amount":"20.25"}},{"entitlement_base_info":{"quota":{"credits_limit":50}},"usage":{"credits_amount":100}}]}`))
 		default:
 			t.Errorf("unexpected Trae endpoint %s", r.URL.Path)
 			w.WriteHeader(404)
@@ -230,6 +232,9 @@ func TestAccountLifecycleAndCredentialIsolation(t *testing.T) {
 	}
 	if a.Credits != 130.25 || a.Total != 200.5 || a.AvatarURL != "https://lf3-static.trae.com.cn/avatar.png" || !a.BalanceKnown || a.CheckinDone || f.refreshes != 1 {
 		t.Fatalf("incorrect initial account: %+v", a)
+	}
+	if a.Plan != "免费" {
+		t.Fatalf("subscription tier not extracted from entitlement list: %q", a.Plan)
 	}
 	public, _ := json.Marshal(s.List())
 	if strings.Contains(string(public), "private-session-for-test") || strings.Contains(string(public), f.token) || strings.Contains(string(public), "1234567890123456") {

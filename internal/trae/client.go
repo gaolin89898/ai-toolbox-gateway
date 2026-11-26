@@ -356,10 +356,35 @@ func (c *Client) checkin(ctx context.Context, a *Account) error {
 	return nil
 }
 
+// traePlan picks the display name of the active subscription pack
+// (product_type=0 with status=1, e.g. 免费/Pro). Anything malformed or
+// oversized is ignored so the account keeps its previous plan name.
+func traePlan(data map[string]json.RawMessage) string {
+	var packs []map[string]json.RawMessage
+	if json.Unmarshal(data["user_entitlement_pack_list"], &packs) != nil {
+		return ""
+	}
+	for _, pack := range packs {
+		base := object(pack["entitlement_base_info"])
+		if number(base["product_type"]) != 0 || number(pack["status"]) != 1 {
+			continue
+		}
+		name := str(pack["display_desc"])
+		if name == "" || len(name) > 40 || strings.ContainsAny(name, "\r\n\"<>") {
+			return ""
+		}
+		return name
+	}
+	return ""
+}
+
 func (c *Client) balance(ctx context.Context, a *Account) error {
 	data, err := c.request(ctx, "/trae/api/v2/pay/user_current_entitlement_list", a)
 	if err != nil {
 		return err
+	}
+	if plan := traePlan(data); plan != "" {
+		a.Plan = plan
 	}
 	// Current responses include both subscription privileges (without a
 	// credits_limit) and credit packages. The billing summary is authoritative;

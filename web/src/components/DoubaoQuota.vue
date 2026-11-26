@@ -12,14 +12,10 @@ const subscriptionQuotas = computed(() => quotas.value.filter(quota => quota.kin
 </script>
 
 <template>
-  <!-- 桌面端：方案、可用总额和赠送额度。 -->
+  <!-- 桌面端：方案徽章移至账号列，剩余数字不再重复展示（可用额度见顶部统计）。 -->
   <div v-if="part === 'main'" class="doubao-quota-list">
-    <div class="quota-meta-line">
-      <small v-if="account.plan" class="quota-plan">{{ account.plan }}</small>
-    </div>
-    <div class="quota-heading"><span>可用额度</span><b>{{ accountCredits(account) }}</b></div>
     <div v-for="(quota, index) in mainQuotas" :key="index" class="doubao-quota">
-      <div class="quota-heading"><span>{{ quota.name }}</span><span>剩余 <b>{{ formatNumber(quota.remaining) }}</b></span></div>
+      <div class="quota-heading"><span>{{ quota.name }}</span></div>
       <a-progress :percent="usedRatio(quota)" :show-text="false" size="small" :stroke-width="6" :color="account.disabled ? 'var(--muted)' : 'var(--accent)'" />
       <small>已用 {{ formatNumber(quota.used) }} / {{ formatNumber(quota.total) }}</small>
       <small v-if="quota.expires_at">{{ date(quota.expires_at) }} 到期</small>
@@ -32,7 +28,7 @@ const subscriptionQuotas = computed(() => quotas.value.filter(quota => quota.kin
   <div v-else-if="part === 'subscription'" class="doubao-quota-list">
     <template v-if="subscriptionQuotas.length">
       <div v-for="(quota, index) in subscriptionQuotas" :key="index" class="doubao-quota">
-        <div class="quota-heading"><span>{{ quota.name }}</span><span>剩余 <b>{{ formatNumber(quota.remaining) }}</b></span></div>
+        <div class="quota-heading"><span>{{ quota.name }}</span></div>
         <a-progress :percent="usedRatio(quota)" :show-text="false" size="small" :stroke-width="6" :color="account.disabled ? 'var(--muted)' : 'var(--accent)'" />
         <small>已用 {{ formatNumber(quota.used) }} / {{ formatNumber(quota.total) }}</small>
         <small v-if="quota.expires_at">{{ date(quota.expires_at) }} 到期</small>
@@ -43,9 +39,8 @@ const subscriptionQuotas = computed(() => quotas.value.filter(quota => quota.kin
     <span v-else class="quota-empty">—</span>
   </div>
 
-  <!-- 移动端与通用：完整堆叠 -->
+  <!-- 移动端与通用：完整堆叠（方案徽章已在账号列展示） -->
   <div v-else class="doubao-quota-list">
-    <small v-if="account.plan" class="quota-plan">{{ account.plan }}</small>
     <div class="quota-heading"><span>可用额度</span><b>{{ accountCredits(account) }}</b></div>
     <div v-for="(quota, index) in quotas" :key="index" class="doubao-quota">
       <div class="quota-heading"><span>{{ quota.name }}</span><span>剩余 <b>{{ formatNumber(quota.remaining) }}</b></span></div>
@@ -63,11 +58,9 @@ const subscriptionQuotas = computed(() => quotas.value.filter(quota => quota.kin
 <style scoped>
 .doubao-quota-list { display: grid; gap: 12px; min-width: 200px; width: 100%; }
 .doubao-quota { display: grid; gap: 4px; }
-.quota-meta-line { display: flex; align-items: center; gap: 8px; min-height: 20px; }
 .quota-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 12px; }
 .quota-heading b { color: var(--text); font-size: 16px; font-variant-numeric: tabular-nums; }
 .doubao-quota-list small { color: var(--muted); font-size: 11px; line-height: 1.5; }
-.quota-plan { display: inline-flex; align-items: center; padding: 1px 8px; background: var(--accent-soft); color: var(--accent) !important; border-radius: 999px; font-size: 11px; line-height: 1.7; width: fit-content; }
 .quota-empty { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .quota-updated { display: inline-flex; align-items: center; gap: 5px; margin-top: 2px; }
 .quota-ok { width: 6px; height: 6px; border-radius: 3px; background: var(--color-success-6, #00b42a); flex-shrink: 0; }

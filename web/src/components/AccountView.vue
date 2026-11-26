@@ -1,11 +1,11 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import DesktopSwitch from './DesktopSwitch.vue';
 import DoubaoQuota from './DoubaoQuota.vue';
 import AntigravityQuota from './AntigravityQuota.vue';
 import { Button as AButton, Input as AInput, Table as ATable, TableColumn as ATableColumn, Progress as AProgress, Empty as AEmpty, Tooltip as ATooltip, Modal as AModal, Select as ASelect, Option as AOption } from '@arco-design/web-vue';
-import { IconSearch, IconFilter, IconRefresh, IconPlus, IconCheck, IconClockCircle, IconArrowRight, IconCalendar } from '@arco-design/web-vue/es/icon';
-import { providerSupportsCheckin, canCheckin, checkinState, accountEdition, accountCredits, planLabel, formatHour, formatNumber } from '../useAccounts';
+import { IconSearch, IconFilter, IconPlus, IconCheck, IconClockCircle, IconArrowRight, IconCalendar } from '@arco-design/web-vue/es/icon';
+import { AUTO_REFRESH_OPTIONS, providerSupportsCheckin, canCheckin, checkinState, accountEdition, accountBadge, accountCredits, formatHour, formatNumber } from '../useAccounts';
 
 const props = defineProps({ model: Object });
 const sessionOnly = computed(() => props.model.provider === 'antigravity');
@@ -20,12 +20,70 @@ const antigravityReset = computed(() => {
   if (!times.length) return '5 小时窗口';
   return '5 小时重置 ' + new Date(Math.min(...times)).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' });
 });
-const refreshLabel = computed(() => sessionOnly.value || doubao.value ? '刷新额度' : '刷新积分');
 const noCheckin = computed(() => !providerSupportsCheckin(props.model.provider));
 const emptyDescription = computed(() => props.model.accounts.length ? '没有匹配的账号' : '还没有账号');
 const emit = defineEmits(['remark', 'remove', 'navigate', 'switch']);
 const query = ref(''), filter = ref('all'), expiryVisible = ref(false), filtersVisible = ref(false);
 const quiet = promise => promise?.catch(() => {});
+const autoRefreshOptions = AUTO_REFRESH_OPTIONS.map(seconds => ({
+  value: seconds,
+  label: seconds ? `每 ${seconds} 秒` : '关闭自动刷新',
+  shortLabel: seconds ? `${seconds}s` : '自动',
+}));
+const autoRefreshTip = computed(() => props.model.autoRefreshSeconds
+  ? `已开启自动刷新，每 ${props.model.autoRefreshSeconds} 秒更新一次（页面隐藏时暂停）`
+  : '设置自动刷新频率（5-30 秒）');
+let autoRefreshTimer = null, autoRefreshVersion = 0, lastAutoRefreshAt = Date.now(), mounted = false;
+function clearAutoRefresh() {
+  clearTimeout(autoRefreshTimer);
+  autoRefreshTimer = null;
+}
+function canRunAutoRefresh() {
+  return mounted && props.model.autoRefreshSeconds > 0 && !document.hidden && props.model.connected && props.model.accounts.length > 0;
+}
+function scheduleAutoRefresh(delayMs) {
+  clearAutoRefresh();
+  const seconds = props.model.autoRefreshSeconds;
+  if (!mounted || !seconds || document.hidden) return;
+  const version = ++autoRefreshVersion;
+  const wait = delayMs ?? seconds * 1000;
+  autoRefreshTimer = setTimeout(async () => {
+    autoRefreshTimer = null;
+    if (version !== autoRefreshVersion || !mounted || props.model.autoRefreshSeconds !== seconds) return;
+    if (canRunAutoRefresh() && !props.model.busy.has('balances')) {
+      lastAutoRefreshAt = Date.now();
+      await quiet(props.model.refreshBalances({ quiet: true }));
+    }
+    if (version === autoRefreshVersion && mounted && props.model.autoRefreshSeconds === seconds && !document.hidden) {
+      scheduleAutoRefresh();
+    }
+  }, wait);
+}
+function handleVisibilityChange() {
+  if (document.hidden) { clearAutoRefresh(); return; }
+  const seconds = props.model.autoRefreshSeconds;
+  if (!mounted || !seconds) return;
+  const elapsed = Date.now() - lastAutoRefreshAt;
+  scheduleAutoRefresh(Math.max(0, seconds * 1000 - elapsed));
+}
+watch(() => props.model.autoRefreshSeconds, (seconds, previous) => {
+  ++autoRefreshVersion;
+  lastAutoRefreshAt = Date.now();
+  if (seconds) scheduleAutoRefresh(previous === 0 ? 0 : undefined);
+  else clearAutoRefresh();
+});
+onMounted(() => {
+  mounted = true;
+  lastAutoRefreshAt = Date.now();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  if (props.model.autoRefreshSeconds > 0) scheduleAutoRefresh();
+});
+onBeforeUnmount(() => {
+  mounted = false;
+  ++autoRefreshVersion;
+  clearAutoRefresh();
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+});
 const filters = computed(() => [
   { id: 'all', text: '全部', count: props.model.accounts.length },
   ...(noCheckin.value ? [] : [{ id: 'pending', text: '待签到', count: props.model.pending.length },
@@ -47,8 +105,8 @@ function expiryDate(entry) { return new Date(entry.expires_at || entry.date).toL
 <template>
   <section class="account-view">
     <header class="page-heading">
-      <div class="page-toolbar"><slot name="platform-switcher" /><div class="heading-actions"><a-button :loading="model.busy.has('balances')" :disabled="!model.accounts.length" @click="quiet(model.refreshBalances())"><template #icon><icon-refresh /></template>{{ refreshLabel }}</a-button><a-button v-if="!noCheckin" :loading="model.busy.has('checkin-all')" :disabled="!model.pending.length" @click="quiet(model.checkinAll())"><template #icon><icon-check /></template>全部签到</a-button><a-button type="primary" @click="model.openAdd()"><template #icon><icon-plus /></template>添加账号</a-button></div></div>
-      <div class="mobile-bulk-actions"><a-tooltip :content="refreshLabel"><a-button :aria-label="refreshLabel" :loading="model.busy.has('balances')" :disabled="!model.accounts.length" @click="quiet(model.refreshBalances())"><template #icon><icon-refresh /></template></a-button></a-tooltip><a-tooltip v-if="!noCheckin" content="全部签到"><a-button aria-label="全部签到" :loading="model.busy.has('checkin-all')" :disabled="!model.pending.length" @click="quiet(model.checkinAll())"><template #icon><icon-check /></template></a-button></a-tooltip></div>
+      <div class="page-toolbar"><slot name="platform-switcher" /><div class="heading-actions"><a-tooltip :content="autoRefreshTip"><span class="auto-refresh-wrap"><a-select :model-value="model.autoRefreshSeconds" :class="['auto-refresh-select', { active: model.autoRefreshSeconds > 0 }]" aria-label="自动刷新间隔" :trigger-props="{ autoFitPopupMinWidth: true }" @change="model.setAutoRefreshSeconds"><template #label="{ data }"><span class="auto-refresh-label"><i v-if="Number(data.value) > 0" class="status-dot auto-refresh-dot" /><icon-clock-circle v-else class="auto-refresh-icon" /><span>{{ Number(data.value) > 0 ? `自动 ${data.value}s` : '自动刷新' }}</span></span></template><a-option v-for="opt in autoRefreshOptions" :key="opt.value" :value="opt.value" :label="opt.label">{{ opt.label }}</a-option></a-select></span></a-tooltip><a-button v-if="!noCheckin" :loading="model.busy.has('checkin-all')" :disabled="!model.pending.length" @click="quiet(model.checkinAll())"><template #icon><icon-check /></template>全部签到</a-button><a-button type="primary" @click="model.openAdd()"><template #icon><icon-plus /></template>添加账号</a-button></div></div>
+      <div class="mobile-bulk-actions"><a-select :model-value="model.autoRefreshSeconds" :class="['auto-refresh-select', 'mobile-auto-refresh', { active: model.autoRefreshSeconds > 0 }]" aria-label="自动刷新间隔" size="small" :trigger-props="{ autoFitPopupMinWidth: true }" @change="model.setAutoRefreshSeconds"><template #label="{ data }"><span class="auto-refresh-label"><i v-if="Number(data.value) > 0" class="status-dot auto-refresh-dot" /><span>{{ Number(data.value) > 0 ? `${data.value}s` : '自动' }}</span></span></template><a-option v-for="opt in autoRefreshOptions" :key="opt.value" :value="opt.value" :label="opt.label">{{ opt.label }}</a-option></a-select><a-tooltip v-if="!noCheckin" content="全部签到"><a-button aria-label="全部签到" :loading="model.busy.has('checkin-all')" :disabled="!model.pending.length" @click="quiet(model.checkinAll())"><template #icon><icon-check /></template></a-button></a-tooltip></div>
     </header>
 
     <div class="stats-band" :style="sessionOnly || doubao ? { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' } : noCheckin ? { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' } : undefined">
@@ -72,13 +130,13 @@ function expiryDate(entry) { return new Date(entry.expires_at || entry.date).toL
     <div class="desktop-account-table">
       <a-table :data="visible" row-key="uid" :pagination="false" :bordered="false" :loading="model.loading" :scroll="{ x: doubao ? 1270 : antigravity ? 1220 : 1050 }" :hoverable="false">
         <template #columns>
-          <a-table-column title="账号" :width="300"><template #cell="{ record }"><div class="account-identity"><span :class="['account-avatar', { disabled: record.disabled }]">{{ model.accountName(record).slice(0, 1) }}<img v-if="record.avatar_url" :key="record.avatar_url" :src="record.avatar_url" alt="" referrerpolicy="no-referrer" @error="$event.target.hidden = true"></span><div class="identity-text"><div class="identity-name"><strong>{{ model.accountName(record) }}</strong><span v-if="record.user_type || record.tier" class="plan-badge">{{ record.user_type ? planLabel(record.user_type) : record.tier }}</span></div><small>{{ record.uid }}</small><a-tooltip v-if="record.last_error" :content="record.last_error"><div class="account-warning">{{ record.last_error }}</div></a-tooltip></div></div></template></a-table-column>
+          <a-table-column title="账号" :width="300"><template #cell="{ record }"><div class="account-identity"><span :class="['account-avatar', { disabled: record.disabled }]">{{ model.accountName(record).slice(0, 1) }}<img v-if="record.avatar_url" :key="record.avatar_url" :src="record.avatar_url" alt="" referrerpolicy="no-referrer" @error="$event.target.hidden = true"></span><div class="identity-text"><div class="identity-name"><strong>{{ model.accountName(record) }}</strong><span v-if="accountBadge(record)" class="plan-badge">{{ accountBadge(record) }}</span></div><small>{{ record.uid }}</small><a-tooltip v-if="record.last_error" :content="record.last_error"><div class="account-warning">{{ record.last_error }}</div></a-tooltip></div></div></template></a-table-column>
           <a-table-column title="状态" :width="112"><template #cell="{ record }"><span :class="['account-status', { disabled: record.disabled, 'warning-text': record.last_error && !record.disabled }]"><i class="status-dot" />{{ record.disabled ? '已停用' : record.last_error ? '需处理' : '正常' }}</span><small class="realm-name">{{ accountEdition(record) }}</small></template></a-table-column>
           <a-table-column v-if="!sessionOnly" :title="doubao ? '订阅与额度' : '剩余积分'" :width="doubao ? 330 : 150"><template #cell="{ record }"><DoubaoQuota v-if="doubao" part="main" :account="record" /><template v-else><div :class="['credit-amount', { disabled: record.disabled }]"><b>{{ accountCredits(record) }}</b><small v-if="record.credits_total"> / {{ formatNumber(record.credits_total) }}</small></div><a-progress v-if="record.credits_total" :percent="ratio(record)" :show-text="false" size="small" :stroke-width="3" :color="record.disabled ? 'var(--muted)' : 'var(--accent)'" /></template></template></a-table-column>
           <a-table-column v-if="antigravity" title="额度（周 / 5 小时）" :width="500"><template #cell="{ record }"><AntigravityQuota :account="record" /></template></a-table-column>
           <a-table-column v-if="doubao" title="套餐与周期额度" :width="240"><template #cell="{ record }"><DoubaoQuota part="subscription" :account="record" /></template></a-table-column>
           <a-table-column v-if="!noCheckin" title="今日签到" :width="124"><template #cell="{ record }"><span :class="['checkin-tag', checkinState(record).kind]"><icon-check v-if="record.checkin_done" /><icon-clock-circle v-else-if="canCheckin(record)" />{{ checkinState(record).text }}</span></template></a-table-column>
-          <a-table-column title="操作" :width="model.provider === 'trae' ? 360 : 300" align="right"><template #cell="{ record }"><div class="row-actions"><DesktopSwitch :model="model" :account="record" @switch="emit('switch', $event)" /><a-button v-if="canCheckin(record) && !record.checkin_done" type="text" size="mini" class="checkin-action" :loading="model.busy.has(record.uid + ':checkin')" @click="quiet(model.accountAction(record, 'checkin'))">签到</a-button><template v-if="['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(record.provider)"><a-button type="text" size="mini" :loading="model.busy.has(record.uid + ':balance')" @click="quiet(model.accountAction(record, 'balance'))">刷新</a-button><a-button type="text" size="mini" @click="record.provider === 'doubao' ? model.updateDoubao(record) : record.provider === 'antigravity' ? model.updateAntigravity(record) : record.provider === 'qoder' ? model.updateQoder(record) : record.provider === 'minimax' ? model.updateMiniMax(record) : model.updateTrae(record)">{{ ['antigravity', 'doubao'].includes(record.provider) ? '重新授权' : '凭证' }}</a-button></template><a-button type="text" size="mini" @click="emit('remark', record)">备注</a-button><a-button v-if="model.capabilities?.gateway && !['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(record.provider)" type="text" size="mini" :loading="model.busy.has(record.uid + ':' + (record.paused ? 'resume' : 'pause'))" @click="quiet(model.accountAction(record, record.paused ? 'resume' : 'pause'))">{{ record.paused ? '恢复选号' : '暂停选号' }}</a-button><a-button type="text" size="mini" :loading="model.busy.has(record.uid + ':' + (record.disabled ? 'revive' : 'disable'))" @click="quiet(model.accountAction(record, record.disabled ? 'revive' : 'disable'))">{{ record.disabled ? '启用' : '停用' }}</a-button><a-button type="text" status="danger" size="mini" @click="emit('remove', record)">移除</a-button></div></template></a-table-column>
+          <a-table-column title="操作" :width="model.provider === 'trae' ? 360 : 300" align="right"><template #cell="{ record }"><div class="row-actions"><DesktopSwitch :model="model" :account="record" @switch="emit('switch', $event)" /><a-button v-if="canCheckin(record)" :disabled="record.checkin_done" type="text" size="mini" class="checkin-action" :loading="model.busy.has(record.uid + ':checkin')" @click="quiet(model.accountAction(record, 'checkin'))">{{ record.checkin_done ? '已签到' : '签到' }}</a-button><template v-if="['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(record.provider)"><a-button type="text" size="mini" :loading="model.busy.has(record.uid + ':balance')" @click="quiet(model.accountAction(record, 'balance'))">刷新</a-button><a-button type="text" size="mini" @click="record.provider === 'doubao' ? model.updateDoubao(record) : record.provider === 'antigravity' ? model.updateAntigravity(record) : record.provider === 'qoder' ? model.updateQoder(record) : record.provider === 'minimax' ? model.updateMiniMax(record) : model.updateTrae(record)">{{ ['antigravity', 'doubao'].includes(record.provider) ? '重新授权' : '凭证' }}</a-button></template><a-button type="text" size="mini" @click="emit('remark', record)">备注</a-button><a-button v-if="model.capabilities?.gateway && !['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(record.provider)" type="text" size="mini" :loading="model.busy.has(record.uid + ':' + (record.paused ? 'resume' : 'pause'))" @click="quiet(model.accountAction(record, record.paused ? 'resume' : 'pause'))">{{ record.paused ? '恢复选号' : '暂停选号' }}</a-button><a-button type="text" size="mini" :loading="model.busy.has(record.uid + ':' + (record.disabled ? 'revive' : 'disable'))" @click="quiet(model.accountAction(record, record.disabled ? 'revive' : 'disable'))">{{ record.disabled ? '启用' : '停用' }}</a-button><a-button type="text" status="danger" size="mini" @click="emit('remove', record)">移除</a-button></div></template></a-table-column>
         </template>
         <template #empty><a-empty :description="emptyDescription"><a-button v-if="!model.accounts.length" type="primary" @click="model.openAdd()"><template #icon><icon-plus /></template>添加账号</a-button></a-empty></template>
       </a-table>
@@ -87,11 +145,11 @@ function expiryDate(entry) { return new Date(entry.expires_at || entry.date).toL
 
     <div class="mobile-account-list">
       <article v-for="account in visible" :key="account.uid" class="mobile-account">
-        <div class="mobile-account-top"><div class="account-identity"><span :class="['account-avatar', { disabled: account.disabled }]">{{ model.accountName(account).slice(0, 1) }}<img v-if="account.avatar_url" :key="account.avatar_url" :src="account.avatar_url" alt="" referrerpolicy="no-referrer" @error="$event.target.hidden = true"></span><div class="identity-text"><div class="identity-name"><strong>{{ model.accountName(account) }}</strong><span v-if="account.user_type || account.tier" class="plan-badge">{{ account.user_type ? planLabel(account.user_type) : account.tier }}</span></div><small>{{ account.uid }}</small></div></div><span :class="['account-status', { disabled: account.disabled }]"><i class="status-dot" />{{ account.disabled ? '已停用' : '正常' }}</span></div>
+        <div class="mobile-account-top"><div class="account-identity"><span :class="['account-avatar', { disabled: account.disabled }]">{{ model.accountName(account).slice(0, 1) }}<img v-if="account.avatar_url" :key="account.avatar_url" :src="account.avatar_url" alt="" referrerpolicy="no-referrer" @error="$event.target.hidden = true"></span><div class="identity-text"><div class="identity-name"><strong>{{ model.accountName(account) }}</strong><span v-if="accountBadge(account)" class="plan-badge">{{ accountBadge(account) }}</span></div><small>{{ account.uid }}</small></div></div><span :class="['account-status', { disabled: account.disabled }]"><i class="status-dot" />{{ account.disabled ? '已停用' : '正常' }}</span></div>
         <div v-if="antigravity" class="mobile-account-balance"><small>额度（周 / 5 小时）</small><AntigravityQuota :account="account" :mobile="true" /></div>
         <div v-if="!sessionOnly" class="mobile-account-balance"><DoubaoQuota v-if="doubao" :account="account" /><div v-else><small>剩余积分</small><div class="credit-amount"><b>{{ accountCredits(account) }}</b><small v-if="account.credits_total"> / {{ formatNumber(account.credits_total) }}</small></div></div><span v-if="!noCheckin" :class="['checkin-tag', checkinState(account).kind]"><icon-check v-if="account.checkin_done" /><icon-clock-circle v-else-if="canCheckin(account)" />{{ checkinState(account).text }}</span></div>
         <p v-if="account.last_error" class="account-warning" :title="account.last_error">{{ account.last_error }}</p>
-        <div v-if="!['minimax', 'antigravity', 'doubao'].includes(account.provider)" class="mobile-desktop-action"><DesktopSwitch :model="model" :account="account" @switch="emit('switch', $event)" /></div><footer class="mobile-account-footer"><span class="realm-pill">{{ accountEdition(account) }}</span><div class="row-actions"><a-button v-if="canCheckin(account) && !account.checkin_done" type="text" size="mini" :loading="model.busy.has(account.uid + ':checkin')" @click="quiet(model.accountAction(account, 'checkin'))">签到</a-button><template v-if="['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(account.provider)"><a-button type="text" size="mini" :loading="model.busy.has(account.uid + ':balance')" @click="quiet(model.accountAction(account, 'balance'))">刷新</a-button><a-button type="text" size="mini" @click="account.provider === 'doubao' ? model.updateDoubao(account) : account.provider === 'antigravity' ? model.updateAntigravity(account) : account.provider === 'qoder' ? model.updateQoder(account) : account.provider === 'minimax' ? model.updateMiniMax(account) : model.updateTrae(account)">{{ ['antigravity', 'doubao'].includes(account.provider) ? '重新授权' : '凭证' }}</a-button></template><a-button type="text" size="mini" @click="emit('remark', account)">备注</a-button><a-button v-if="model.capabilities?.gateway && !['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(account.provider)" type="text" size="mini" :loading="model.busy.has(account.uid + ':' + (account.paused ? 'resume' : 'pause'))" @click="quiet(model.accountAction(account, account.paused ? 'resume' : 'pause'))">{{ account.paused ? '恢复选号' : '暂停选号' }}</a-button><a-button type="text" size="mini" :loading="model.busy.has(account.uid + ':' + (account.disabled ? 'revive' : 'disable'))" @click="quiet(model.accountAction(account, account.disabled ? 'revive' : 'disable'))">{{ account.disabled ? '启用' : '停用' }}</a-button><a-button type="text" status="danger" size="mini" @click="emit('remove', account)">移除</a-button></div></footer>
+        <div v-if="!['minimax', 'antigravity', 'doubao'].includes(account.provider)" class="mobile-desktop-action"><DesktopSwitch :model="model" :account="account" @switch="emit('switch', $event)" /></div><footer class="mobile-account-footer"><span class="realm-pill">{{ accountEdition(account) }}</span><div class="row-actions"><a-button v-if="canCheckin(account)" :disabled="account.checkin_done" type="text" size="mini" :loading="model.busy.has(account.uid + ':checkin')" @click="quiet(model.accountAction(account, 'checkin'))">{{ account.checkin_done ? '已签到' : '签到' }}</a-button><template v-if="['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(account.provider)"><a-button type="text" size="mini" :loading="model.busy.has(account.uid + ':balance')" @click="quiet(model.accountAction(account, 'balance'))">刷新</a-button><a-button type="text" size="mini" @click="account.provider === 'doubao' ? model.updateDoubao(account) : account.provider === 'antigravity' ? model.updateAntigravity(account) : account.provider === 'qoder' ? model.updateQoder(account) : account.provider === 'minimax' ? model.updateMiniMax(account) : model.updateTrae(account)">{{ ['antigravity', 'doubao'].includes(account.provider) ? '重新授权' : '凭证' }}</a-button></template><a-button type="text" size="mini" @click="emit('remark', account)">备注</a-button><a-button v-if="model.capabilities?.gateway && !['trae', 'qoder', 'minimax', 'antigravity', 'doubao'].includes(account.provider)" type="text" size="mini" :loading="model.busy.has(account.uid + ':' + (account.paused ? 'resume' : 'pause'))" @click="quiet(model.accountAction(account, account.paused ? 'resume' : 'pause'))">{{ account.paused ? '恢复选号' : '暂停选号' }}</a-button><a-button type="text" size="mini" :loading="model.busy.has(account.uid + ':' + (account.disabled ? 'revive' : 'disable'))" @click="quiet(model.accountAction(account, account.disabled ? 'revive' : 'disable'))">{{ account.disabled ? '启用' : '停用' }}</a-button><a-button type="text" status="danger" size="mini" @click="emit('remove', account)">移除</a-button></div></footer>
       </article>
       <a-empty v-if="!visible.length && !model.loading" :description="emptyDescription"><a-button v-if="!model.accounts.length" type="primary" @click="model.openAdd()">添加账号</a-button></a-empty>
       <p v-if="!noCheckin" class="mobile-schedule-line"><i class="status-dot" />{{ model.schedule?.checkin_enabled ? '自动签到' : '自动签到已关闭' }} {{ model.effectiveHours.map(formatHour).join(' / ') }}<template v-if="model.nextRun"> · 下次 {{ model.nextRun.day }} {{ model.nextRun.time }}</template></p>
@@ -99,10 +157,10 @@ function expiryDate(entry) { return new Date(entry.expires_at || entry.date).toL
 
     <div v-if="!sessionOnly" class="account-insights">
       <section v-if="!noCheckin" class="schedule-insight"><div class="inline-between"><h2>自动签到 <span :class="['checkin-tag', model.schedule?.checkin_enabled ? 'success' : 'muted']">{{ model.schedule?.checkin_enabled ? '运行中' : '已关闭' }}</span></h2><a-button type="text" size="mini" @click="emit('navigate', 'settings')">签到设置<icon-arrow-right /></a-button></div><div class="insight-times"><template v-for="(hour, index) in model.effectiveHours" :key="hour"><span v-if="index" class="time-separator">·</span><b>{{ formatHour(hour) }}</b></template><small>每天 · 北京时间</small></div><div class="schedule-pills"><span v-for="hour in model.effectiveHours" :key="hour"><icon-calendar />{{ formatHour(hour) }}</span></div><p><icon-clock-circle />{{ model.nextRun ? `下次运行 ${model.nextRun.day} ${model.nextRun.time} · 还有 ${model.nextRun.remaining}` : '当前仅支持手动签到' }}</p></section>
-      <section v-if="model.provider === 'qoder'" class="expiry-insight"><div class="inline-between"><h2>登录状态 <small>Qoder 国内版</small></h2></div><div class="expiry-row"><span>支持自动续期</span><b>{{ model.accounts.filter(a => a.has_refresh).length }} 个账号</b></div></section>
+      <section v-if="model.provider === 'qoder'" class="expiry-insight"><div class="inline-between"><h2>奖励领取 <small>Qoder 国内版</small></h2></div><div class="expiry-row"><span>当前符合活动资格</span><b>{{ model.accounts.filter(a => a.checkin_supported).length }} 个账号</b></div><p>奖励轮次为北京时间 10:00 至次日 10:00，资格以 Qoder 当前活动列表为准。</p><a class="qoder-rules" href="https://docs.qoder.cn/events/100credits" target="_blank" rel="noopener noreferrer">官方活动规则</a></section>
       <section v-else-if="model.provider === 'minimax'" class="expiry-insight"><div class="inline-between"><h2>接入状态 <small>MiniMax 国内版</small></h2></div><div class="expiry-row"><span>已添加账号</span><b>{{ model.accounts.length }} 个</b></div><div class="expiry-row"><span>支持自动续期</span><b>{{ model.accounts.filter(a => a.has_refresh).length }} 个账号</b></div><p>浏览器授权与桌面端同流程；令牌临期自动续期，签到在共用时刻执行。</p></section>
       <section v-else-if="model.provider === 'trae'" class="expiry-insight"><div class="inline-between"><h2>登录状态 <small>Trae 国内版</small></h2></div><div class="expiry-row"><span>支持自动续期</span><b>{{ model.accounts.filter(a => a.has_session || a.has_oauth).length }} 个账号</b></div><div class="expiry-row"><span>需要检查凭证或请求结果</span><b>{{ model.accounts.filter(a => a.last_error).length }} 个账号</b></div><p>登录失效后，使用「凭证」重新授权或更新 Session。</p></section>
-      <section v-else-if="model.provider === 'doubao'" class="expiry-insight"><div class="inline-between"><h2>额度状态 <small>豆包</small></h2></div><div class="expiry-row"><span>已获取余额</span><b>{{ model.accounts.filter(a => a.balance_known).length }} 个账号</b></div><div class="expiry-row"><span>操作需重试</span><b>{{ model.accounts.filter(a => a.last_error).length }} 个账号</b></div><p>可用额度为套餐与赠送之和，近 7 天等滚动上限单独展示。查看豆包时每分钟自动查询，也可点击「刷新额度」；查询失败时保留上次成功结果和时间。</p></section>
+      <section v-else-if="model.provider === 'doubao'" class="expiry-insight"><div class="inline-between"><h2>额度状态 <small>豆包</small></h2></div><div class="expiry-row"><span>已获取余额</span><b>{{ model.accounts.filter(a => a.balance_known).length }} 个账号</b></div><div class="expiry-row"><span>操作需重试</span><b>{{ model.accounts.filter(a => a.last_error).length }} 个账号</b></div><p>可用额度为套餐与赠送之和，近 7 天等滚动上限单独展示。查看豆包时每分钟自动查询，也可在顶部开启自动刷新或点击单账号「刷新」；查询失败时保留上次成功结果和时间。</p></section>
       <section v-else class="expiry-insight"><div class="inline-between"><h2>积分到期 <small>按到期先后扣减</small></h2><a-button v-if="model.expiryEntries.length" type="text" size="mini" @click="expiryVisible = true">查看全部<icon-arrow-right /></a-button></div><div v-if="!model.expiryEntries.length" class="inline-empty">暂无积分到期记录</div><div v-for="entry in model.expiryEntries.slice(0, 2)" :key="entry.uid + entry.date + entry.expires_at" class="expiry-row"><time>{{ expiryDate(entry) }}</time><span>{{ entry.name }}</span><b>{{ formatNumber(entry.remain) }} 分</b><small>{{ daysLeft(entry) }} 天后</small></div><p v-if="expirySoon.length">30 天内共 {{ formatNumber(expirySoon.reduce((sum, entry) => sum + Number(entry.remain), 0)) }} 分到期</p></section>
     </div>
     <a-modal v-model:visible="expiryVisible" title="积分到期" :footer="false" width="560px" :unmount-on-close="true"><div class="all-expiry"><div v-for="entry in model.expiryEntries" :key="entry.uid + entry.date + entry.expires_at" class="expiry-row"><time>{{ expiryDate(entry) }}</time><span>{{ entry.name }}</span><b>{{ formatNumber(entry.remain) }} 分</b><small>{{ daysLeft(entry) }} 天后</small></div></div></a-modal>

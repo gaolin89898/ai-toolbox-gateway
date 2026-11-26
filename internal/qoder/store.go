@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +32,9 @@ type Account struct {
 	Total            float64   `json:"credits_total"`
 	BalanceKnown     bool      `json:"balance_known"`
 	BalanceUpdatedAt time.Time `json:"balance_updated_at"`
+	CampaignUntil    time.Time `json:"campaign_until"`
+	LastPeriod       string    `json:"last_period"`
+	ClaimedUntil     time.Time `json:"claimed_until"`
 	LastError        string    `json:"last_error,omitempty"`
 }
 type Status struct {
@@ -53,23 +58,18 @@ type Status struct {
 }
 
 func status(a Account) Status {
-	return Status{
-		UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "qoder", Realm: "cn",
-		Disabled: a.Disabled, Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown,
-		BalanceUpdatedAt: a.BalanceUpdatedAt, UserType: a.UserType, TokenExpiresAt: a.ExpiresAt,
-		HasRefresh:       a.RefreshToken != "" || a.PAT != "",
-		DesktopSupported: strings.HasPrefix(a.Token, "dt-") && strings.HasPrefix(a.RefreshToken, "drt-"),
-		LastError:        a.LastError,
-	}
+	now := time.Now()
+	return Status{UID: a.ID, AccountUID: a.AccountUID, Nickname: a.Nickname, Provider: "qoder", Realm: "cn", Disabled: a.Disabled, Credits: a.Credits, Total: a.Total, BalanceKnown: a.BalanceKnown, BalanceUpdatedAt: a.BalanceUpdatedAt, UserType: a.UserType, CheckinSupported: a.CampaignUntil.After(now), CheckinDone: a.LastPeriod == RewardPeriod(now) && a.ClaimedUntil.After(now), TokenExpiresAt: a.ExpiresAt, HasRefresh: a.RefreshToken != "" || a.PAT != "", DesktopSupported: strings.HasPrefix(a.Token, "dt-") && strings.HasPrefix(a.RefreshToken, "drt-"), LastError: a.LastError}
 }
 
 type Store struct {
-	mu            sync.RWMutex
-	op            sync.Mutex
-	path          string
-	accounts      []Account
-	client        *Client
-	desktopSource func() *Account
+	mu             sync.RWMutex
+	op             sync.Mutex
+	path           string
+	accounts       []Account
+	client         *Client
+	desktopSource  func() *Account
+	refreshEnabled atomic.Bool
 }
 
 func Open(path string, c *Client) (*Store, error) {
@@ -77,6 +77,7 @@ func Open(path string, c *Client) (*Store, error) {
 		c = NewClient()
 	}
 	s := &Store{path: path, client: c, accounts: []Account{}}
+	s.refreshEnabled.Store(true)
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return s, nil
@@ -84,17 +85,9 @@ func Open(path string, c *Client) (*Store, error) {
 	if err != nil || json.Unmarshal(raw, &s.accounts) != nil {
 		return nil, fmt.Errorf("读取 Qoder 账号存档失败")
 	}
-	for i := range s.accounts {
-		switch s.accounts[i].LastError {
-		case "Qoder 活动列表为空或格式变更，请在客户端查看活动",
-			"Qoder 当前没有可识别的每日积分活动，请在客户端查看活动资格",
-			"Qoder 领取结果尚未确认，请刷新状态，勿连续领取",
-			"Qoder 部分活动暂不可领取，请在客户端查看条件":
-			s.accounts[i].LastError = ""
-		}
-	}
 	return s, nil
 }
+func (s *Store) SetRefreshEnabled(v bool) { s.refreshEnabled.Store(v) }
 func (s *Store) List() []Status {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -213,10 +206,15 @@ func (s *Store) Add(ctx context.Context, a Account, expected string) (Status, []
 			a.Disabled = old.Disabled
 			a.Credits, a.Total, a.BalanceKnown = old.Credits, old.Total, old.BalanceKnown
 			a.BalanceUpdatedAt = old.BalanceUpdatedAt
+			a.CampaignUntil = old.CampaignUntil
+			a.LastPeriod, a.ClaimedUntil = old.LastPeriod, old.ClaimedUntil
 		}
 	}
 	warnings := []string{}
 	if err := s.client.balance(ctx, &a); err != nil {
+		warnings = append(warnings, err.Error())
+	}
+	if err := s.client.checkin(ctx, &a, false); err != nil {
 		warnings = append(warnings, err.Error())
 	}
 	if index < 0 {
@@ -270,19 +268,39 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, string, 
 		case "revive":
 			a.Disabled = false
 			a.LastError = ""
-		case "balance":
+		case "checkin", "balance":
+			if action == "checkin" && a.Disabled {
+				return status(*a), "", fmt.Errorf("该 Qoder 账号已停用")
+			}
 			err = s.fresh(ctx, accounts, i)
-			if err == nil {
+			if err == nil && action == "balance" {
 				err = s.client.balance(ctx, a)
 				if err == nil {
 					if e := s.client.identify(ctx, a); e != nil {
+						warning = e.Error()
+					}
+					if e := s.client.checkin(ctx, a, false); e != nil {
+						warning = e.Error()
+					}
+				}
+			}
+			if err == nil && action == "checkin" {
+				if !status(*a).CheckinDone {
+					err = s.client.checkin(ctx, a, true)
+				}
+				if err == nil && s.refreshEnabled.Load() {
+					if e := s.client.balance(ctx, a); e != nil {
 						warning = e.Error()
 					}
 				}
 			}
 			a.LastError = warning
 			if err != nil {
-				a.LastError = err.Error()
+				if errors.Is(err, errNoEligibleCampaign) {
+					a.LastError = ""
+				} else {
+					a.LastError = err.Error()
+				}
 			}
 		default:
 			return Status{}, "", fmt.Errorf("不支持的 Qoder 操作")
@@ -295,21 +313,24 @@ func (s *Store) Action(ctx context.Context, id, action string) (Status, string, 
 	return Status{}, "", os.ErrNotExist
 }
 func (s *Store) RunAll(ctx context.Context, action string) []string {
-	errors := []string{}
+	errs := []string{}
 	for _, a := range s.List() {
 		if ctx.Err() != nil {
 			break
 		}
-		if a.Disabled {
+		if a.Disabled || action == "checkin" && a.CheckinDone {
 			continue
 		}
 		_, _, err := s.Action(ctx, a.UID, action)
 		if err != nil {
-			errors = append(errors, a.UID+": "+err.Error())
+			if action == "checkin" && errors.Is(err, errNoEligibleCampaign) {
+				continue
+			}
+			errs = append(errs, a.UID+": "+err.Error())
 			log.Printf("qoder: %s 失败 %s", action, err)
 		} else {
 			log.Printf("qoder: %s 完成", action)
 		}
 	}
-	return errors
+	return errs
 }

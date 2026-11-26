@@ -7,7 +7,7 @@ const quiet = promise => promise?.catch(() => {});
 
 <template>
   <div class="login-panel" role="tabpanel">
-    <a-alert v-if="model[provider + 'Draft'].uid" type="info">正在重新授权 {{ model[provider + 'Draft'].nickname || name }}，请登录同一账号。</a-alert>
+    <a-alert v-if="model[provider + 'Draft'].uid" class="login-reauth" type="info">正在重新授权 {{ model[provider + 'Draft'].nickname || name }}，请登录同一账号。</a-alert>
     <p class="dialog-intro">{{ name }} · 完成网页登录后自动保存账号</p>
     <label v-if="provider !== 'doubao'" class="web-login-remark">账号备注<a-input v-model="model[provider + 'Draft'].nickname" :max-length="80" placeholder="选填" :disabled="model.webLogins[provider].waiting" :input-attrs="{ 'aria-label': name + '账号备注' }" /></label>
     <a-alert v-if="model.webLogins[provider].error" type="error" class="login-error">{{ model.webLogins[provider].error }}</a-alert>
@@ -17,7 +17,7 @@ const quiet = promise => promise?.catch(() => {});
       <div class="inline-between"><span><i class="status-dot" />{{ model.webLogins[provider].status }}</span><a-button type="text" @click="model.stopWebLogin(provider)">取消本次授权</a-button></div>
       <a-button v-if="model.webLogins[provider].error" type="outline" long :loading="model.webLogins[provider].polling" @click="quiet(model.retryWebLogin(provider))">重新查询</a-button>
     </div>
-    <a-button v-if="provider === 'doubao'" type="outline" long :loading="model.busy.has('doubao-client-import')" @click="quiet(model.importDoubaoClient())">从豆包客户端导入登录态（用于工作模型转发）</a-button>
+    <a-button v-if="provider === 'doubao'" class="doubao-client-import" type="outline" long :loading="model.busy.has('doubao-client-import')" @click="quiet(model.importDoubaoClient())">从豆包客户端导入登录态（用于工作模型转发）</a-button>
     <p class="dialog-login-status">{{ provider === 'antigravity' ? '使用 Google 账号登录并同意授权，无需填写 OAuth 凭证。' : '在打开的豆包网页中完成登录，无需复制 Cookie 或 Token。' }}</p>
     <p class="dialog-login-status">请在运行面板的电脑上通过 localhost 或 127.0.0.1 使用网页授权。</p>
   </div>
@@ -25,4 +25,9 @@ const quiet = promise => promise?.catch(() => {});
 
 <style scoped>
 .web-login-remark { display: grid; gap: 8px; margin: 0 0 20px; color: var(--secondary); }
+.doubao-client-import { margin-top: 12px; }
+/* 重新授权提示紧贴平台选择行时，靠 dialog-intro 的负上边距收边；
+   提示存在时把这段间距还给提示框，避免说明文字贴到提示框底边。 */
+.login-panel > .login-reauth { margin-bottom: 12px; }
+.login-panel > .login-reauth + .dialog-intro { margin-top: 0; }
 </style>

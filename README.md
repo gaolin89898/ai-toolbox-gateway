@@ -26,7 +26,7 @@
 
 ## 项目简介
 
-WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **WorkBuddy / Trae / Qoder / MiniMax / Antigravity / 豆包** 六个平台的账号（Qoder、Antigravity 与豆包不做签到；豆包展示订阅与额度），支持本机 Windows 客户端账号切换、WorkBuddy 成长任务与活动奖励。页面可通过浏览器、Windows 桌面窗口或 DSH 插件使用，账号和设置由 Go 后端持久保存。
+WorkBuddy2API Panel 提供「AI 工具箱」账号管理页面，默认管理 **WorkBuddy / Trae / Qoder / MiniMax / Antigravity / 豆包** 六个平台的账号（Qoder 按当前活动资格签到，Antigravity 不做签到；豆包展示订阅与额度），支持本机 Windows 客户端账号切换、WorkBuddy 成长任务与活动奖励。页面可通过浏览器、Windows 桌面窗口或 DSH 插件使用，账号和设置由 Go 后端持久保存。
 
 直接运行程序进入账号管理模式；需要为个人工具提供 OpenAI 兼容接口时，使用同一程序加上 `-gateway`。
 
@@ -82,7 +82,7 @@ Google 请求优先遵循 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 环境配置
 | 能力 | 说明 |
 |---|---|
 | 多平台账号 | WorkBuddy 浏览器授权与 Cockpit JSON 导入；Trae 国内版直接登录、凭证及备份导入；Qoder 国内版浏览器授权或 PAT；MiniMax 国内版粘贴 Cookie / 令牌；Antigravity 与豆包直接网页授权，无需填写 OAuth 凭证 |
-| 积分与每日签到 | 单号 / 全部签到、余额刷新、停用 / 启用、备注；每日 09:00 / 21:00 默认时刻可修改，签到范围为 WorkBuddy 国内版、Trae 和 MiniMax |
+| 积分与每日签到 | 单号 / 全部签到、余额刷新、停用 / 启用、备注；每日 09:00 / 21:00 默认时刻可修改，Qoder 按活动列表返回的可领取资格参与，活动轮次从北京时间 10:00 开始 |
 | 本机客户端切换 | Windows WorkBuddy / WorkBuddy AI、Trae CN、Qoder CN；登录态备份、重启后身份核验和失败回滚，支持自定义安装目录和 Qoder 更新目录 |
 | 成长任务与活动奖励 | WorkBuddy 国内版个人账号扫描待办、执行全部待办、查看队列、领取奖励 |
 | 状态持久化 | 凭证、账号状态、备注和签到设置保存在本地；网关模式额外支持用量归档及可选 Upstash Redis 镜像 |
@@ -756,7 +756,7 @@ baseURL 指向 `<网关>/v1/search`，即可零代码接入本网关的搜索能
 
 ### 账号平台与客户端切换
 
-**Qoder 国内版**：在「Qoder → 添加账号」中获取浏览器授权链接，用阿里云账号完成授权后自动保存；也支持 PAT / 访问令牌。可查询剩余积分、停用 / 启用和移除账号。浏览器授权凭证支持到期续期，单独保存在状态文件同目录的 `qoder-accounts.json`（默认 `data/`），含敏感凭证，请勿分享。
+**Qoder 国内版**：在「Qoder → 添加账号」中获取浏览器授权链接，用阿里云账号完成授权后自动保存；也支持 PAT / 访问令牌。可查询剩余积分、停用 / 启用和移除账号。当前每日积分活动按 Qoder 活动列表的活动时间、奖励类型和领取状态判断资格，套餐类型本身不决定是否显示签到；仅出现可识别的 100 积分活动时提供签到，批量签到会跳过没有该活动的账号。活动轮次按北京时间 10:00 起算，并跟随每日自动签到时刻执行。浏览器授权凭证支持到期续期，单独保存在状态文件同目录的 `qoder-accounts.json`（默认 `data/`），含敏感凭证，请勿分享。
 
 Qoder 独立客户端（Windows `Qoder CN.exe`）已使用同一套「切换账号」按钮、确认窗口、任务进度和失败回滚。客户端至少启动并登录过一次以建立本机加密环境，之后面板内通过浏览器授权的账号可直接切换，不需要逐号保存快照。仅替换原生加密登录凭证并清除旧账号覆盖层，不改写本机设备码、项目、聊天数据库或浏览器数据。备份保存在 `data/desktop/backups/`。重启后检查新客户端会话中的账号请求结果及登录文件身份，无法核验时恢复原登录态。Qoder IDE 的 SQLite 登录格式暂未接入。
 
@@ -846,7 +846,7 @@ Trae CN 与 Qoder CN 的运行状态按客户端实际进程路径核对，兼�
 | 成长任务 | `GET accounts/{uid}/tasks`；`POST accounts/{uid}/tasks/accept` · `claim` · `auto`；`POST tasks/scan_all` · `tasks/run_queue`；`GET tasks/queue` |
 | 活动奖励 | `GET/POST benefits/accounts/{uid}/rewards`，仅支持 WorkBuddy 国内版个人账号 |
 | Trae | `GET trae/login/available`；`POST trae/login/start` · `trae/login/cancel`；`GET trae/login/poll`；`POST trae/accounts` · `trae/import` · `trae/accounts/{uid}/{action}` · `trae/checkin_all` · `trae/balance_all`；账号状态包含在 `overview` |
-| Qoder | `POST qoder/login/start` · `qoder/login/cancel`；`GET qoder/login/poll`；`POST qoder/accounts` · `qoder/accounts/{uid}/{action}` · `qoder/balance_all`；账号状态包含在 `overview` |
+| Qoder | `POST qoder/login/start` · `qoder/login/cancel`；`GET qoder/login/poll`；`POST qoder/accounts` · `qoder/accounts/{uid}/{action}`（含 `checkin`）· `qoder/checkin_all` · `qoder/balance_all`；账号状态包含在 `overview` |
 | 本机客户端 | `GET desktop/status`；`POST desktop/capture` · `desktop/switch`，必须为本机访问 |
 
 网关模式另外提供下列管理接口：

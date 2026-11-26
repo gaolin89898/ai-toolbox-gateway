@@ -37,7 +37,11 @@ type Auth struct {
 	UID          string
 	EnterpriseID string
 	Nickname     string
-	FilePath     string // 来源文件；refresh 后原子写回此处
+	// Plan 订阅档位（如「个人体验版」「个人专业版」），来源 get-user-resource
+	// 的订阅基础包名（SubProductCode=sp_tcaca_codebuddy_ide，去掉 CodeBuddy
+	// 前缀）。余额刷新时更新并落盘，仅供面板账号徽章展示，不参与任何路由决策。
+	Plan     string
+	FilePath string // 来源文件；refresh 后原子写回此处
 
 	// DeviceToken 设备风控 Token（X-Device-Token 头），来源 auth 文件的 device_token 键。
 	// 缺省为空 = 不注入该头（容器内无桌面端 Turing SDK 的常见部署）。
@@ -303,6 +307,7 @@ func Parse(raw []byte) (*Auth, error) {
 				UID          string `json:"uid"`
 				EnterpriseID string `json:"enterpriseId"`
 				Nickname     string `json:"nickname"`
+				Plan         string `json:"plan"`
 			} `json:"account"`
 			// DeviceToken 顶层 device_token（嵌套形与扁平形共用；手写时无需嵌进 auth 对象）。
 			DeviceToken string `json:"device_token"`
@@ -319,6 +324,7 @@ func Parse(raw []byte) (*Auth, error) {
 			UID:          n.Account.UID,
 			EnterpriseID: n.Account.EnterpriseID,
 			Nickname:     n.Account.Nickname,
+			Plan:         n.Account.Plan,
 			DeviceToken:  n.DeviceToken,
 		}
 	} else {
@@ -331,6 +337,7 @@ func Parse(raw []byte) (*Auth, error) {
 			UID          string `json:"uid"`
 			EnterpriseID string `json:"enterpriseId"`
 			Nickname     string `json:"nickname"`
+			Plan         string `json:"plan"`
 			DeviceToken  string `json:"device_token"`
 		}
 		if err := json.Unmarshal(raw, &f); err != nil {
@@ -345,6 +352,7 @@ func Parse(raw []byte) (*Auth, error) {
 			UID:          f.UID,
 			EnterpriseID: f.EnterpriseID,
 			Nickname:     f.Nickname,
+			Plan:         f.Plan,
 			DeviceToken:  f.DeviceToken,
 		}
 	}
@@ -378,6 +386,7 @@ func (a *Auth) SaveAtomic() error {
 			"uid":          a.UID,
 			"enterpriseId": a.EnterpriseID,
 			"nickname":     a.Nickname,
+			"plan":         a.Plan,
 		},
 	}
 	// DeviceToken 非空才写回顶层 device_token：避免在无该字段的旧文件里引入空键

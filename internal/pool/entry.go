@@ -71,6 +71,7 @@ type ExpiryBucket struct {
 type Status struct {
 	UID          string `json:"uid"`
 	Nickname     string `json:"nickname,omitempty"`
+	Plan         string `json:"plan,omitempty"` // 订阅档位（余额刷新随上游订阅包名同步），面板徽章展示
 	Credits      int64  `json:"credits"`
 	CreditsTotal int64  `json:"credits_total,omitempty"` // 积分总额度（各套餐聚合）；0 = 未知（旧 state/查询失败）
 	// CreditsExpiring / CreditsEarliestExpiry / CreditsEarliestRemaining 描述当前积分中

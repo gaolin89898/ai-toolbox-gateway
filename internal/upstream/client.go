@@ -2315,6 +2315,7 @@ func (c *Client) UserResourceSnapshot(a *auth.Auth, soon time.Duration) (remain,
 			Data struct {
 				Accounts []struct {
 					PackageName         string `json:"PackageName"`
+					SubProductCode      string `json:"SubProductCode"` // 订阅基础包 sp_tcaca_codebuddy_ide；奖励/裂变包为 *_bonus_pack
 					CycleEndTime        string `json:"CycleEndTime"` // "2006-01-02 15:04:05"，缺省/空 = 无到期
 					ExpiredTime         string `json:"ExpiredTime"`
 					PackageEndTime      string `json:"PackageEndTime"`
@@ -2331,6 +2332,22 @@ func (c *Client) UserResourceSnapshot(a *auth.Auth, soon time.Duration) (remain,
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return 0, 0, 0, time.Time{}, 0, nil, fmt.Errorf("resource parse: %w", err)
+	}
+	// 订阅档位随余额刷新同步（写 a.Plan 并落盘，供面板账号徽章展示）：订阅基础包
+	// （SubProductCode=sp_tcaca_codebuddy_ide，如「CodeBuddy个人体验版」）的包名编码
+	// 当前档位；奖励/签到/裂变包（*_bonus_pack）不属于订阅，不参与。档位变化才写盘。
+	for _, acc := range resp.Response.Data.Accounts {
+		if acc.SubProductCode != "sp_tcaca_codebuddy_ide" || acc.PackageName == "" {
+			continue
+		}
+		if tier := strings.TrimPrefix(acc.PackageName, "CodeBuddy"); tier != "" && len(tier) <= 40 && tier != a.Plan {
+			a.Lock()
+			a.Plan = tier
+			a.Unlock()
+			// 落盘失败不影响余额结果，下次刷新重试。
+			_ = a.SaveAtomic()
+		}
+		break
 	}
 	byDate := make(map[string]*ExpiryBucket)
 	for _, acct := range resp.Response.Data.Accounts {
